@@ -1,0 +1,33 @@
+# Top-most EditorConfig file for this project
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Python is formatted by `ruff format` (PEP 8: 4 spaces, never tabs).
+# This file previously declared indent_style = tab, which contradicted every
+# file under src/ and fought the formatter.
+[*.py]
+indent_style = space
+indent_size = 4
+max_line_length = 88
+
+[*.{yml,yaml,json,toml}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
+
+# Batch files need CRLF. With LF-only line endings cmd.exe can mis-handle
+# labels and goto, so the global end_of_line = lf above must not apply here.
+[*.{bat,cmd}]
+end_of_line = crlf

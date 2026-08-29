@@ -1,0 +1,60 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+sdist/
+wheels/
+*.egg-info/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+*~
+
+# Local tool-group profiles: holds machine-specific project paths, so it is
+# scaffolded per machine with `python -m windows_agent_mcp.profiles --init`
+# rather than committed.
+mcp-profiles.json
+
+# Locally granted web hosts: a per-machine trust decision, not a project
+# setting. Managed with `python -m windows_agent_mcp.hostgrants --add HOST`.
+mcp-allowed-hosts.json
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Linting / type checking
+.ruff_cache/
+.mypy_cache/
+.pyright/
+
+# Environment variables (never commit real values; .env.example is tracked)
+.env
+
+# Downloaded files. The download root lives outside the repo by default
+# (%LOCALAPPDATA%), so only a repo-local override needs ignoring here.
+download/
+downloads/
+
+# OS
+.DS_Store
+Thumbs.db

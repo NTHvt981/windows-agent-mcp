@@ -1,0 +1,122 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "windows-agent-mcp"
+version = "1.0.0"
+description = "Windows Agent MCP Server - A secure MCP server for Windows development automation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+  {name = "Bionic Team", email = "team@bionic.dev"},
+]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "windows",
+    "automation",
+    "powershell",
+    "filesystem",
+    "development-tools",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Development :: Debuggers",
+    "Topic :: Software Development :: Build Tools",
+]
+
+# The server is built on the `MCPServer` API, which was introduced in the
+# 2.x line of the Model Context Protocol Python SDK. Earlier releases expose
+# `FastMCP` instead, so 2.0 is a hard floor rather than a preference.
+dependencies = [
+    "mcp>=2.0",
+    # HTML extraction for the web research tools. Used with its stdlib
+    # "html.parser" backend, so lxml is deliberately NOT pulled in.
+    "beautifulsoup4>=4.12",
+]
+
+[project.scripts]
+windows-agent-mcp = "windows_agent_mcp.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["windows_agent_mcp*"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.10",
+    "pre-commit>=3.4",
+    "ruff>=0.1",
+    "pyright>=1.1",
+    "pytest-cov>=4.1",
+]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.10"
+pythonPlatform = "Windows"
+
+# Strict checking applies to the shipped package. The test suite is
+# deliberately excluded: strict mode demands annotations on every pytest
+# fixture parameter, which buys nothing and drowns real findings.
+# Run it with: pyright src
+include = ["src"]
+ignore = [
+  "**/__pycache__",
+  "**/*.egg-info",
+  ".git",
+]
+
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownParameterType = false
+reportUnknownVariableType = false
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+extend-exclude = [
+  "__pycache__",
+  "*.egg-info",
+  ".git",
+]
+
+# Linter settings belong under [tool.ruff.lint]. The top-level spellings
+# (select/ignore/per-file-ignores) are deprecated and emit a warning on every
+# run.
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # Pyflakes
+  "I",   # isort
+  "B",   # flake8-bugbear
+  "C4",  # flake8-comprehensions
+  "UP",  # pyupgrade
+]
+ignore = [
+  "E501",  # Line length (handled by the formatter)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests intentionally import fixtures and helpers that look unused, and
+# assert on private behaviour.
+"tests/*.py" = ["B011"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+pythonpath = ["src"]

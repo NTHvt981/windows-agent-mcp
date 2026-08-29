@@ -1,0 +1,44 @@
+# Pre-commit configuration for Windows Agent MCP Server
+#
+# Install the hooks:  pre-commit install
+# Run against everything: pre-commit run --all-files
+#
+# Get the dev tools first: uv sync --extra dev
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+      # The download root default must stay machine-independent: a hardcoded
+      # path under one developer's profile cannot be created on anyone
+      # else's, which previously broke every tool touching it.
+      - id: check-case-conflict
+
+  # Lint and format with Ruff. Keep this revision in step with the `ruff`
+  # pin in pyproject.toml's [dev] extra, so CI and local runs agree.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.4
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # The test suite is fast (<5s) and hermetic -- no network, no writes into
+  # the repository -- so it is cheap enough to gate every commit.
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: python -m pytest
+        args: [tests, -q]
+        language: system
+        pass_filenames: false
+        types: [python]
