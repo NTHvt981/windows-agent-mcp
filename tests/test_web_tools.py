@@ -34,7 +34,7 @@ def _clear_page_cache() -> None:
 
 @pytest.fixture
 def research(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
 
 def _html(body: str) -> bytes:
@@ -69,7 +69,7 @@ def test_fetch_web_page_refuses_an_off_list_host_by_default() -> None:
     assert "documentation hosts" in recovery
     assert "the whole host is refused, not that page" in recovery
     assert "hostgrants --add docs.python.org" in recovery
-    assert "BIONIC_WEB_RESEARCH" in recovery
+    assert "WAMCP_WEB_RESEARCH" in recovery
 
 
 def test_fetch_web_page_reads_a_doc_host_without_research_mode(
@@ -127,7 +127,7 @@ def test_disabled_error_tells_the_model_not_to_retry() -> None:
     recovery = " ".join(payload["error"]["recovery"])
 
     assert "DO NOT retry" in recovery
-    assert "BIONIC_WEB_RESEARCH" in recovery
+    assert "WAMCP_WEB_RESEARCH" in recovery
 
 
 def test_host_check_happens_before_any_network_use(page_opener) -> None:
@@ -216,7 +216,7 @@ def test_search_no_results_is_plain_text_not_an_error(
 def test_search_reports_an_invalid_backend_name(
     research: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("BIONIC_SEARCH_BACKEND", "brave")
+    monkeypatch.setenv("WAMCP_SEARCH_BACKEND", "brave")
 
     payload = assert_error_response(web_search("x"), "SEARCH_BACKEND_INVALID")
 

@@ -168,7 +168,7 @@ def test_pyproject_without_requires_python(tmp_path) -> None:
 
 def plan(**overrides: object) -> list[list[str]]:
     arguments: dict[str, object] = {
-        "root": Path("S:/project"),
+        "root": Path("C:/project"),
         "python": "C:/py/python.exe",
         "uv": None,
         "dev": True,
@@ -301,7 +301,7 @@ def fake_repo(tmp_path) -> Path:
     # None of the following may travel.
     write(".venv/Scripts/python.exe")
     write(".venv/Lib/site-packages/mcp/__init__.py")
-    write("mcp-profiles.json", '{"version": 1}')
+    write("input/config.json", '{"version": 1}')
     write("mcp-allowed-hosts.json", '{"version": 1, "hosts": []}')
     write(".env", "SECRET=1")
     write(".coverage")
@@ -345,7 +345,7 @@ def test_the_venv_is_never_shipped(fake_repo) -> None:
 def test_machine_specific_files_are_never_shipped(fake_repo) -> None:
     """Local trust and path configuration must not travel in the archive.
 
-    mcp-profiles.json holds project paths that mean nothing elsewhere, and
+    input/config.json holds project paths that mean nothing elsewhere, and
     mcp-allowed-hosts.json holds web hosts the operator chose to trust on ONE
     machine. Shipping either would hand a new machine decisions nobody made
     there -- and for the grants file that decision is which sites the model may
@@ -354,7 +354,7 @@ def test_machine_specific_files_are_never_shipped(fake_repo) -> None:
 
     names = selected(fake_repo)
 
-    assert "mcp-profiles.json" not in names
+    assert "input/config.json" not in names
     assert "mcp-allowed-hosts.json" not in names
     assert ".env" not in names
     assert ".coverage" not in names
@@ -415,13 +415,13 @@ def test_the_real_repository_ships_the_package_and_tests() -> None:
     names = selected(REPO_ROOT)
 
     assert "src/windows_agent_mcp/main.py" in names
-    assert "src/windows_agent_mcp/profiles.py" in names
+    assert "src/windows_agent_mcp/config.py" in names
     assert "src/windows_agent_mcp/hostgrants.py" in names
     assert "src/windows_agent_mcp/consent.py" in names
     assert "tests/conftest.py" in names
     assert "pyproject.toml" in names
 
-    assert "mcp-profiles.json" not in names
+    assert "input/config.json" not in names
     assert "mcp-allowed-hosts.json" not in names
     assert not any(name.startswith(".venv") for name in names)
 
@@ -553,7 +553,7 @@ def test_dest_copy_omits_machine_specific_files(fake_repo, tmp_path) -> None:
 
     copied = destination / packager.PROJECT_NAME
 
-    assert not (copied / "mcp-profiles.json").exists()
+    assert not (copied / "input" / "config.json").exists()
     assert not (copied / "mcp-allowed-hosts.json").exists()
     assert not (copied / ".venv").exists()
 
@@ -605,13 +605,13 @@ def test_cli_list_prints_the_selection(fake_repo, rooted_at, capsys) -> None:
     }
 
     assert "pyproject.toml" in listed
-    assert "mcp-profiles.json" not in listed
+    assert "input/config.json" not in listed
     assert "files," in out
 
     # The footer names what was excluded, which is the point of a dry run --
     # an allowlist fails by omission, so the omissions have to be visible.
     assert "Excluded by the allowlist" in out
-    assert "mcp-profiles.json" in out
+    assert "input" in out
 
 
 def test_cli_writes_a_versioned_archive(fake_repo, rooted_at, capsys) -> None:
@@ -710,6 +710,10 @@ def test_every_document_is_packaged() -> None:
     present = {
         path.relative_to(REPO_ROOT).as_posix()
         for path in [*REPO_ROOT.glob("*.md"), *REPO_ROOT.glob("docs/*.md")]
+        # `*_claude.md` is local context: gitignored, and deliberately absent
+        # from the archive. test_local_context_files_are_never_packaged covers
+        # that side, so exempting them here is not a hole.
+        if not path.name.endswith("_claude.md")
     }
 
     packaged = set(packager.INCLUDED_FILES)
@@ -723,21 +727,115 @@ def test_every_document_is_packaged() -> None:
 
 
 def test_the_docs_directory_is_where_the_docs_are() -> None:
-    """Only README.md and CLAUDE.md belong at the root.
-
-    CLAUDE.md is the deliberate exception: an AI coding tool discovers it at
-    the project root, so a copy under docs/ would never be read. Pinned here so
-    a future tidy-up does not move it and quietly disable the design rules.
-    """
+    """Guides live in docs/; only README.md sits at the top."""
 
     at_root = sorted(path.name for path in REPO_ROOT.glob("*.md"))
 
-    assert at_root == ["CLAUDE.md", "README.md"], (
+    assert at_root == ["README.md"], (
         f"unexpected markdown at the repository root: {at_root}. "
-        f"Everything except README.md and CLAUDE.md belongs in docs/."
+        f"Everything except README.md belongs in docs/."
     )
 
     assert (REPO_ROOT / "docs" / "HOW_TO_USE.md").is_file()
+
+
+def test_the_repository_is_self_contained() -> None:
+    """Everything the project claims about itself must be inside it.
+
+    This is published on its own, so a file one directory up does not exist for
+    anyone who clones it. pyproject.toml declares MIT, and a licence claim with
+    no licence file is worse than no claim.
+    """
+
+    assert (REPO_ROOT / "LICENSE").is_file(), (
+        "pyproject.toml declares a licence but no LICENSE file is present"
+    )
+    assert (REPO_ROOT / ".gitignore").is_file(), (
+        "no .gitignore: .venv, dist and input/config.json would be committed"
+    )
+
+
+def test_nothing_tracked_references_local_context_files() -> None:
+    """`*_claude.md` files are gitignored, so a clone will not have them.
+
+    They hold development narrative and design notes kept alongside the code
+    but not published. A tracked file linking to one is a dead link for
+    everybody else -- and the failure is invisible here, where the files exist.
+
+    Checked by name rather than by asking git, so this works in an extracted
+    archive and in a checkout that is not a repository yet.
+    """
+
+    tracked = [
+        path
+        for path in [*REPO_ROOT.glob("*.md"), *REPO_ROOT.glob("docs/*.md")]
+        if not path.name.endswith("_claude.md")
+    ]
+
+    offenders: list[str] = []
+
+    for path in tracked:
+        text = path.read_text(encoding="utf-8")
+
+        for line_no, line in enumerate(text.splitlines(), 1):
+            if "_claude.md" in line:
+                relative = path.relative_to(REPO_ROOT).as_posix()
+                offenders.append(f"{relative}:{line_no}: {line.strip()[:70]}")
+
+    assert offenders == [], (
+        "published files reference gitignored local-context files:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_claude_md_is_never_committed_or_packaged() -> None:
+    """CLAUDE.md holds design rules for an AI assistant, and is not published.
+
+    Two separate guards, because the obvious one has a hole: the `*_claude.md`
+    pattern in .gitignore does NOT match `CLAUDE.md` -- there is no underscore
+    -- so the file has to be named explicitly there as well.
+
+    The reasoning it holds is not lost by excluding it. It lives in README.md
+    under "Design notes", and in comments beside the code it explains, where
+    everyone reading the repository can find it.
+    """
+
+    assert not (REPO_ROOT / "CLAUDE.md").exists(), (
+        "CLAUDE.md is present in the repository; it is local context and "
+        "belongs above this directory"
+    )
+
+    assert "CLAUDE.md" not in packager.INCLUDED_FILES, (
+        "CLAUDE.md is in the archive allowlist"
+    )
+
+    ignored = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+    assert "CLAUDE.md" in [line.strip() for line in ignored], (
+        "CLAUDE.md is not named in .gitignore, and `*_claude.md` does not "
+        "match it -- a copy placed here would be committed"
+    )
+
+
+def test_local_context_files_are_never_packaged() -> None:
+    """The archive must be what the repository is, not more.
+
+    package.py selects by allowlist, so this holds by construction today. The
+    test exists so that adding a `*_claude.md` to INCLUDED_FILES has to be a
+    deliberate argument rather than an oversight.
+    """
+
+    packaged = [name for name in packager.INCLUDED_FILES if name.endswith("_claude.md")]
+
+    assert packaged == [], f"local-context files in the archive allowlist: {packaged}"
+
+    selected = [
+        path.as_posix()
+        for path in packager.collect_files(REPO_ROOT)
+        if path.name.endswith("_claude.md")
+    ]
+
+    assert selected == [], f"local-context files selected for the archive: {selected}"
 
 
 def test_not_packaged_entries_are_real_files() -> None:

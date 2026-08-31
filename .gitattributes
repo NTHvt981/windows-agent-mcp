@@ -1,0 +1,15 @@
+# Line endings, enforced by git rather than only by .editorconfig.
+#
+# .editorconfig is honoured by editors; this is honoured by checkout. Without
+# it, a contributor with core.autocrlf=input gets an LF run_server.bat, and
+# cmd.exe mishandles labels and `goto` in a batch file with LF-only endings --
+# a failure that appears as the launcher silently doing the wrong thing rather
+# than as an error.
+
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never touched: a lockfile is compared byte for byte.
+uv.lock -text

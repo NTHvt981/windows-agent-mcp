@@ -56,7 +56,7 @@ def edit_file(
     strings and stays CRLF.
 
     Edits are confined to the download root plus any directory listed in
-    BIONIC_PROJECT_ROOTS.
+    WAMCP_PROJECT_ROOTS.
 
     Args:
         path: File to edit. Must already exist.

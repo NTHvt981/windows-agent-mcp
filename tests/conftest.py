@@ -116,18 +116,23 @@ class FakeOpener:
 # Environment isolation
 # ============================================================
 
-# Every environment variable the server reads. Scrubbed before each test.
+# Environment variables the server reads, scrubbed before each test.
+#
+# WAMCP_CONFIG_FILE and WAMCP_ALLOWED_HOSTS_FILE are deliberately NOT here.
+# The fixtures below POINT those at tmp_path, and scrubbing them in one autouse
+# fixture while setting them in another makes the result depend on fixture
+# ordering -- which pytest decides from the dependency graph, not from the order
+# they are written here. That silently un-isolated the config file: the suite
+# read the developer's real one and every test that called main() inherited it.
 _SERVER_ENV_VARS = (
-    "BIONIC_TOOLS",
-    "BIONIC_PROFILE",
-    "BIONIC_PROFILES_FILE",
-    "BIONIC_WEB_RESEARCH",
-    "BIONIC_SEARCH_BACKEND",
-    "BIONIC_PROJECT_ROOTS",
-    "BIONIC_ALLOWED_HOSTS_FILE",
-    "BIONIC_EXTRA_DOC_HOSTS",
-    "BIONIC_HOST_CONSENT",
-    "BIONIC_HOST_GRANT_PERSIST",
+    "WAMCP_TOOLS",
+    "WAMCP_PROFILE",
+    "WAMCP_WEB_RESEARCH",
+    "WAMCP_SEARCH_BACKEND",
+    "WAMCP_PROJECT_ROOTS",
+    "WAMCP_EXTRA_DOC_HOSTS",
+    "WAMCP_HOST_CONSENT",
+    "WAMCP_HOST_GRANT_PERSIST",
 )
 
 
@@ -137,7 +142,7 @@ def _isolate_server_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Not tidiness -- correctness. pre-commit runs this suite on every commit
     and its comment promises the suite is hermetic. Without this, a developer
-    who has BIONIC_WEB_RESEARCH exported (that is, anyone actually USING the
+    who has WAMCP_WEB_RESEARCH exported (that is, anyone actually USING the
     research tools) would see a different tool count and could not commit.
 
     Tests that want a variable set do so explicitly with monkeypatch.setenv,
@@ -166,7 +171,7 @@ def _isolate_host_grants(tmp_path, monkeypatch: pytest.MonkeyPatch):
     """
 
     monkeypatch.setenv(
-        "BIONIC_ALLOWED_HOSTS_FILE",
+        "WAMCP_ALLOWED_HOSTS_FILE",
         str(tmp_path / "no-such-grants.json"),
     )
 
@@ -175,6 +180,38 @@ def _isolate_host_grants(tmp_path, monkeypatch: pytest.MonkeyPatch):
     yield
 
     hostgrants.clear_session_grants()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Guarantee no test reads the developer's real input/config.json.
+
+    Scrubbing WAMCP_CONFIG_FILE is not enough: find_config_file() falls back to
+    `input/config.json` under the current directory and then under the
+    repository root, so a developer who had set a project root there would run
+    a suite configured differently from everyone else's -- and the tests
+    asserting default behaviour would fail on their machine only.
+
+    Points at a path inside tmp_path instead. Nothing is created: a missing
+    file is the guaranteed starting state, and a test that wants one writes it.
+    """
+
+    monkeypatch.setenv("WAMCP_CONFIG_FILE", str(tmp_path / "no-such-config.json"))
+
+
+@pytest.fixture
+def config_file(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    """A writable config path, wired into the environment.
+
+    Returns the path rather than creating it, because "the file does not exist
+    yet" is the case the server generates from.
+    """
+
+    path = tmp_path / "input" / "config.json"
+
+    monkeypatch.setenv("WAMCP_CONFIG_FILE", str(path))
+
+    return path
 
 
 @pytest.fixture
@@ -187,7 +224,7 @@ def grants_file(tmp_path, monkeypatch: pytest.MonkeyPatch):
 
     path = tmp_path / "mcp-allowed-hosts.json"
 
-    monkeypatch.setenv("BIONIC_ALLOWED_HOSTS_FILE", str(path))
+    monkeypatch.setenv("WAMCP_ALLOWED_HOSTS_FILE", str(path))
 
     return path
 
@@ -256,7 +293,7 @@ def resolves_public(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def isolated_download_root(tmp_path, monkeypatch: pytest.MonkeyPatch):
-    """Point BIONIC_DOWNLOAD_ROOT at a temporary directory.
+    """Point WAMCP_DOWNLOAD_ROOT at a temporary directory.
 
     Without this, tests that touch the download root either write into the
     developer's real download directory or leave stray directories in the
@@ -265,7 +302,7 @@ def isolated_download_root(tmp_path, monkeypatch: pytest.MonkeyPatch):
 
     root = tmp_path / "downloads"
 
-    monkeypatch.setenv("BIONIC_DOWNLOAD_ROOT", str(root))
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(root))
 
     return root.resolve()
 
@@ -274,9 +311,9 @@ def isolated_download_root(tmp_path, monkeypatch: pytest.MonkeyPatch):
 def writable_project(tmp_path, monkeypatch: pytest.MonkeyPatch):
     """A temporary project directory that write_file and edit_file may write to.
 
-    Points BOTH roots at tmp_path: BIONIC_DOWNLOAD_ROOT so
+    Points BOTH roots at tmp_path: WAMCP_DOWNLOAD_ROOT so
     get_allowed_working_directories() does not create (or write into) the
-    developer's real download directory, and BIONIC_PROJECT_ROOTS so the
+    developer's real download directory, and WAMCP_PROJECT_ROOTS so the
     project itself is writable. Every write test needs both, because the
     download root is always in the allowed list.
     """
@@ -284,8 +321,8 @@ def writable_project(tmp_path, monkeypatch: pytest.MonkeyPatch):
     project = tmp_path / "project"
     project.mkdir()
 
-    monkeypatch.setenv("BIONIC_DOWNLOAD_ROOT", str(tmp_path / "downloads"))
-    monkeypatch.setenv("BIONIC_PROJECT_ROOTS", str(project))
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(tmp_path / "downloads"))
+    monkeypatch.setenv("WAMCP_PROJECT_ROOTS", str(project))
 
     return project.resolve()
 

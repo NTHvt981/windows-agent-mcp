@@ -35,7 +35,7 @@ def roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     (project_a / "src").mkdir()
 
-    monkeypatch.setenv("BIONIC_DOWNLOAD_ROOT", str(download))
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(download))
     monkeypatch.setenv(
         PROJECT_ROOTS_ENV_VAR,
         os.pathsep.join([str(project_a), str(project_b)]),
@@ -73,7 +73,7 @@ def test_default_is_download_root_only(
 ) -> None:
     """Widening beyond the download root must be opt-in."""
 
-    monkeypatch.setenv("BIONIC_DOWNLOAD_ROOT", str(tmp_path / "dl"))
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(tmp_path / "dl"))
     monkeypatch.delenv(PROJECT_ROOTS_ENV_VAR, raising=False)
 
     assert get_allowed_working_directories() == [(tmp_path / "dl").resolve()]
@@ -87,7 +87,7 @@ def test_stale_configured_root_is_skipped_not_fatal(
     good = tmp_path / "good"
     good.mkdir()
 
-    monkeypatch.setenv("BIONIC_DOWNLOAD_ROOT", str(tmp_path / "dl"))
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(tmp_path / "dl"))
     monkeypatch.setenv(
         PROJECT_ROOTS_ENV_VAR,
         os.pathsep.join([str(tmp_path / "does_not_exist"), str(good)]),
@@ -105,7 +105,7 @@ def test_a_file_configured_as_a_root_is_skipped(
     target = tmp_path / "file.txt"
     target.write_text("x", encoding="utf-8")
 
-    monkeypatch.setenv("BIONIC_DOWNLOAD_ROOT", str(tmp_path / "dl"))
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(tmp_path / "dl"))
     monkeypatch.setenv(PROJECT_ROOTS_ENV_VAR, str(target))
 
     assert target.resolve() not in get_allowed_working_directories()

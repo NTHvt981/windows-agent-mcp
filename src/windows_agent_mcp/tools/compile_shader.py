@@ -73,7 +73,7 @@ def compile_shader(
 
     The output file is written beside the source unless `output` says
     otherwise, and is subject to the same write confinement as write_file:
-    the download root, or a directory in BIONIC_PROJECT_ROOTS.
+    the download root, or a directory in WAMCP_PROJECT_ROOTS.
 
     Args:
         source: Shader file to compile.
@@ -112,7 +112,7 @@ def compile_shader(
             path=working_directory,
             recovery=[
                 "DO NOT retry the identical working_directory.",
-                "Ask the user to add the project directory to BIONIC_PROJECT_ROOTS.",
+                "Ask the user to add the project directory to WAMCP_PROJECT_ROOTS.",
             ],
         )
 
@@ -204,7 +204,7 @@ def compile_shader(
                 "DO NOT retry the identical output path.",
                 "Compiling writes a binary next to the source, so the "
                 "shader's directory must be writable.",
-                "Ask the user to add the project directory to BIONIC_PROJECT_ROOTS.",
+                "Ask the user to add the project directory to WAMCP_PROJECT_ROOTS.",
             ],
         )
 

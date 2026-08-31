@@ -107,11 +107,11 @@ def test_get_tools_does_not_read_the_environment(
 ) -> None:
     """Purity keeps the suite independent of the developer's shell.
 
-    If this read os.environ, anyone with BIONIC_WEB_RESEARCH exported could
+    If this read os.environ, anyone with WAMCP_WEB_RESEARCH exported could
     not commit, because pre-commit runs these tests.
     """
 
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     assert get_tools(web_enabled=False) == TOOLS
 
@@ -268,7 +268,7 @@ def test_list_directory_success_is_not_a_json_envelope(tmp_path) -> None:
 
 
 def test_server_info(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("BIONIC_DOWNLOAD_ROOT", str(tmp_path / "dl"))
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(tmp_path / "dl"))
 
     data = json.loads(get_server_info())
 
@@ -286,7 +286,7 @@ def test_system_info() -> None:
 
 
 def test_download_directory_created_from_override(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("BIONIC_DOWNLOAD_ROOT", str(tmp_path / "dl"))
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(tmp_path / "dl"))
 
     root = get_download_root()
 

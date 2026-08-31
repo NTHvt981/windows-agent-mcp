@@ -45,7 +45,7 @@ def build_project(
     Args:
         command: Build command, e.g. "cmake --build build --config Debug".
         working_directory: Directory to build in. Must be inside the download
-            root or a root listed in BIONIC_PROJECT_ROOTS.
+            root or a root listed in WAMCP_PROJECT_ROOTS.
         timeout_seconds: Wall-clock limit, 1 to 1800. Defaults to 600, since
             a cold C++ build takes far longer than a shell command.
 
@@ -127,7 +127,7 @@ def build_project(
             path=working_directory,
             recovery=[
                 "DO NOT retry the identical working_directory.",
-                "Ask the user to add the project directory to BIONIC_PROJECT_ROOTS.",
+                "Ask the user to add the project directory to WAMCP_PROJECT_ROOTS.",
             ],
         )
 

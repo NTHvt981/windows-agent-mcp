@@ -24,7 +24,7 @@ def download_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     root = tmp_path / "downloads"
 
-    monkeypatch.setenv("BIONIC_DOWNLOAD_ROOT", str(root))
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(root))
 
     return root.resolve()
 
@@ -184,7 +184,7 @@ def test_short_names_are_not_truncated() -> None:
 def test_truncated_name_still_fits_the_part_suffix(tmp_path, monkeypatch) -> None:
     """The limit must leave room for the ".part" file used during download."""
 
-    monkeypatch.setenv("BIONIC_DOWNLOAD_ROOT", str(tmp_path))
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(tmp_path))
 
     destination = safe_download_path("x" * 400 + ".tar.gz")
     temporary = destination.with_suffix(destination.suffix + ".part")

@@ -115,7 +115,7 @@ set "PYTHONIOENCODING=utf-8"
 set "PYTHONUNBUFFERED=1"
 
 if defined WEB (
-    set "BIONIC_WEB_RESEARCH=1"
+    set "WAMCP_WEB_RESEARCH=1"
     echo [info] Web research ENABLED -- web_search is registered, and
     echo        fetch_web_page may now reach any public HTTPS host instead of
     echo        documentation sites only. Fetched pages are untrusted input,
@@ -123,7 +123,7 @@ if defined WEB (
 )
 
 if not defined ALLOW_HOSTS goto hosts_done
-set "BIONIC_EXTRA_DOC_HOSTS=%ALLOW_HOSTS%"
+set "WAMCP_EXTRA_DOC_HOSTS=%ALLOW_HOSTS%"
 echo [info] Extra readable hosts: %ALLOW_HOSTS%
 echo        fetch_web_page may read these in addition to the built-in
 echo        documentation hosts. Reading only -- download_file is
@@ -133,16 +133,16 @@ echo.
 :hosts_done
 
 if not defined PROFILE goto profile_done
-set "BIONIC_PROFILE=%PROFILE%"
+set "WAMCP_PROFILE=%PROFILE%"
 echo [info] Profile: %PROFILE%
-echo        Resolved from mcp-profiles.json. If the name is wrong or
+echo        Resolved from input\config.json. If the name is wrong or
 echo        disabled the server still starts with default tools and
 echo        get_server_info reports why.
 echo.
 :profile_done
 
 if not defined TOOLS goto tools_done
-set "BIONIC_TOOLS=%TOOLS%"
+set "WAMCP_TOOLS=%TOOLS%"
 echo [info] Tool groups: %TOOLS%
 echo        core is always included. get_server_info reports the
 echo        active set and names any group it did not recognise.
@@ -163,13 +163,14 @@ echo.
 REM The single most common confusion: write_file/edit_file/build_project all
 REM refuse to touch a project until the operator names it. Say so up front
 REM rather than letting the model discover it as a permission error.
-if not defined BIONIC_PROJECT_ROOTS (
-    echo [info] BIONIC_PROJECT_ROOTS is not set, so writes and builds are
-    echo        limited to the download sandbox. To work on a real project:
-    echo            set BIONIC_PROJECT_ROOTS=C:\path\to\your\project
+if not defined WAMCP_PROJECT_ROOTS (
+    echo [info] WAMCP_PROJECT_ROOTS is not set, so writes and builds are
+    echo        limited to the download sandbox. To work on a real project,
+    echo        set it in input\config.json, or for this run only:
+    echo            set WAMCP_PROJECT_ROOTS=C:\path\to\your\project
     echo.
 ) else (
-    echo [info] Writable/buildable roots: %BIONIC_PROJECT_ROOTS%
+    echo [info] Writable/buildable roots: %WAMCP_PROJECT_ROOTS%
     echo.
 )
 
@@ -213,8 +214,8 @@ echo        Your shell's PATH predates the Node install -- reopen it to fix.
 REM The Inspector does NOT hand its own environment to the server it spawns.
 REM The MCP SDK's stdio client uses a fixed allowlist (PATH, TEMP, APPDATA and
 REM a few more) so a client cannot leak its secrets into every server it
-REM launches -- which means BIONIC_TOOLS, BIONIC_PROJECT_ROOTS and
-REM BIONIC_WEB_RESEARCH all silently vanished under --dev. Inspector 2.x has
+REM launches -- which means WAMCP_TOOLS, WAMCP_PROJECT_ROOTS and
+REM WAMCP_WEB_RESEARCH all silently vanished under --dev. Inspector 2.x has
 REM no -e flag; a config file with an explicit env block is the supported
 REM route, and values stated there ARE passed through.
 REM
@@ -269,7 +270,7 @@ echo                       [--profile NAME] [--allow-host HOSTS]
 echo.
 echo   --dev    Run under the MCP Inspector (needs Node.js/npx). Gives you a
 echo            browser UI to list and call tools by hand.
-echo   --web    Set BIONIC_WEB_RESEARCH=1, which registers web_search and
+echo   --web    Set WAMCP_WEB_RESEARCH=1, which registers web_search and
 echo            lets fetch_web_page reach ANY public host. Read the
 echo            "Web research" section of README.md before using this.
 echo            Usually you want less: --tools core,docs,search registers
@@ -293,11 +294,11 @@ echo              all       every group
 echo            Omit to register everything except search and research.
 echo            Examples: --tools edit,build,docs
 echo                      --tools core,docs,search
-echo   --profile  Named profile from mcp-profiles.json, which is a
-echo            friendlier way to say --tools. Create the file with:
-echo              .venv\Scripts\python.exe -m windows_agent_mcp.profiles --init
-echo            then list what it defines with --list. An explicit
-echo            --tools wins over a profile.
+echo   --profile  Named profile from input\config.json, which is a
+echo            friendlier way to say --tools. That file is generated on
+echo            the first run; see what it defines with:
+echo              .venv\Scripts\python.exe -m windows_agent_mcp.config --list
+echo            An explicit --tools wins over a profile.
 echo   --allow-host  Extra hostnames fetch_web_page may READ, on top of
 echo            the built-in documentation hosts. Comma-separated,
 echo            hostnames only -- no scheme, path or wildcard. Reading

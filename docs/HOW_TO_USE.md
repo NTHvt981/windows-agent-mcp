@@ -63,7 +63,7 @@ Three things are **deliberately excluded** and recreated on the target machine:
 | Excluded | Why |
 |---|---|
 | `.venv\` | The virtual environment has absolute paths baked into its scripts, so it simply does not work in a different folder or on a different machine. Step 3 recreates it |
-| `mcp-profiles.json` | It contains paths to *your* projects, which mean nothing on another machine. Step 5 recreates it |
+| `input/config.json` | It contains paths to *your* projects, which mean nothing on another machine. The first run there generates a fresh one |
 | `mcp-allowed-hosts.json` | The web hosts you allowed on *this* machine. A trust decision should be made again, not inherited. Step 6 recreates it |
 
 Also skipped: editor settings, previous archives, and all caches
@@ -146,17 +146,34 @@ python -m venv .venv
 
 **Do this before you try to write or build anything.**
 
-By default the server can only write inside a private download sandbox. Point
-it at your real project with `BIONIC_PROJECT_ROOTS`:
+By default the server can only write inside a private download sandbox.
 
-```bash
-set BIONIC_PROJECT_ROOTS=C:\path\to\your\project
+The first time you start the server it generates **`input/config.json`**, which
+lists every setting with its default and what it does. Open it and fill in the
+one that matters:
+
+```json
+"WAMCP_PROJECT_ROOTS": {
+  "value": "C:/path/to/your/project",
+  "default": "the download sandbox only",
+  "description": "Directories the model may WRITE to and RUN builds in..."
+}
 ```
 
 Several projects, separated by semicolons:
+`"C:/path/to/game;D:/path/to/engine"`.
+
+Have not started it yet? Generate the file now:
 
 ```bash
-set BIONIC_PROJECT_ROOTS=C:\path\to\game;D:\path\to\engine
+.venv\Scripts\python.exe -m windows_agent_mcp.config --init
+```
+
+You can still use an environment variable, and it takes precedence over the
+file for that run:
+
+```bash
+set WAMCP_PROJECT_ROOTS=C:\path\to\your\project
 ```
 
 If you skip this, everything still starts — but `write_file`, `edit_file`,
@@ -170,10 +187,10 @@ If you skip this, everything still starts — but `write_file`, `edit_file`,
 > in order to be useful — but point it at your project folder, not at a whole
 > drive.
 
-Note that **nothing reads a `.env` file automatically.** Set these as real
-environment variables in whatever launches the server — usually the `env` block
-of your MCP client's configuration (step 8). `.env.example` documents every
-available variable.
+Note that **nothing reads a `.env` file automatically.** `input/config.json`
+is the normal route. If you prefer environment variables, set them in whatever
+launches the server — usually the `env` block of your MCP client's
+configuration (step 8), which is the only channel some clients have.
 
 ---
 
@@ -195,40 +212,37 @@ Tools come in six **groups**:
 | `search` | Web search — lets it *find* pages (it still needs permission to read them) |
 | `research` | Web search **and** reading any site, with no per-site approval |
 
-A **profile** is a named combination. Create the profiles file:
+A **profile** is a named combination, defined in the same
+`input/config.json`. See what you have:
 
 ```bash
-.venv\Scripts\python.exe -m windows_agent_mcp.profiles --init
-```
-
-If it already exists, that refuses rather than overwriting your edits — add
-`--force` if you really want to start over.
-
-See what it defines:
-
-```bash
-.venv\Scripts\python.exe -m windows_agent_mcp.profiles --list
+.venv\Scripts\python.exe -m windows_agent_mcp.config --list
 ```
 
 ```
-profile     state       tools  groups
-cpp         enabled        14  build,core,docs,edit
-explore     enabled         7  core
-full        enabled        17  build,core,docs,edit,net
-research    DISABLED        9  core,docs,research
-review      enabled        12  build,core,docs
+profiles
+----------------------------------------------------------------------
+  cpp          enabled     14 tools  build,core,docs,edit
+               C++ / Vulkan development.
+  explore      enabled      7 tools  core
+               Read-only: cannot write, execute or reach the network.
+  research     DISABLED     9 tools  core,docs,research
+  review       enabled     12 tools  build,core,docs
 ```
 
-Edit `mcp-profiles.json` to suit you: change which groups a profile loads, set
-`"enable": false` to park one without deleting it, or add a per-profile
-`BIONIC_PROJECT_ROOTS` so a profile carries its own project path.
+Edit the `profiles` section to suit you: change which groups one loads, set
+`"enable": false` to park it without deleting it, or give it its own
+`settings` block so it carries its own project path.
+
+Pick one with `"active_profile": "cpp"` in the file, or per run with
+`run_server.bat --profile cpp`.
 
 `research` ships disabled because it lets the server fetch *any* website. Read
 the *Web research* section of [README.md](../README.md#web-research) before
 enabling it.
 
-Leave profiles alone entirely if you like — with no profile selected you get
-every group except `research`.
+Leave profiles alone entirely if you like — with none selected you get every
+group except `search` and `research`.
 
 See [README.md](../README.md#tool-groups) for what each group costs and the full
 tool listing.
@@ -357,7 +371,7 @@ An MCP client needs to know how to start the server. Generate that
 configuration rather than writing it by hand:
 
 ```bash
-.venv\Scripts\python.exe -m windows_agent_mcp.profiles --emit client
+.venv\Scripts\python.exe -m windows_agent_mcp.config --emit client
 ```
 
 It prints one entry per enabled profile, with full absolute paths that will
@@ -369,14 +383,14 @@ actually work:
     "cpp": {
       "command": "C:/path/to/mcp-server/.venv/Scripts/windows-agent-mcp.exe",
       "env": {
-        "BIONIC_TOOLS": "edit,build,docs",
-        "BIONIC_PROJECT_ROOTS": "C:/path/to/your/project"
+        "WAMCP_TOOLS": "edit,build,docs",
+        "WAMCP_PROJECT_ROOTS": "C:/path/to/your/project"
       }
     },
     "explore": {
       "command": "C:/path/to/mcp-server/.venv/Scripts/windows-agent-mcp.exe",
       "env": {
-        "BIONIC_TOOLS": "core"
+        "WAMCP_TOOLS": "core"
       }
     }
   }
@@ -416,16 +430,31 @@ python bootstrap.py --check      # is the install healthy?
 | `No virtual environment found` | Not installed yet | Run `python bootstrap.py` |
 | Server starts, then nothing happens | Correct — it is waiting for a client | Use `run_server.bat --dev` to click tools by hand |
 | A tool is missing from the list | Its group is not loaded | Call `get_server_info` and read `active_tool_groups` |
-| `WRITE_PATH_NOT_ALLOWED` | `BIONIC_PROJECT_ROOTS` is not set, or the path is outside it | See step 4, then restart the server |
+| `WRITE_PATH_NOT_ALLOWED` | `WAMCP_PROJECT_ROOTS` is not set, or the path is outside it | See step 4, then restart the server |
 | `URL_NOT_ALLOWED` | The site is not on the readable list | See step 6. Allow the one host, do not enable all of them |
 | `URL_NOT_ALLOWED` mentioning a *redirect* | The site redirected to another hostname, often `www.` vs no `www.` | Allow the host named in the message too |
 | It invents web links that do not exist | It has no search tool, so it is recalling URLs from training | Add the `search` group — see step 6 |
 | `PROTECTED_PATH` | The model tried to write the server's own config | Working as intended. Only you may edit those files |
 | `npx was not found` | Your terminal's PATH predates the Node.js install | Close and reopen the terminal |
-| Your profile seems ignored | An explicit `BIONIC_TOOLS` overrides a profile | Call `get_server_info` and read `profile_error` |
-| A profile name is rejected | Wrong name, or `"enable": false` | `profiles --list` shows both |
+| Your profile seems ignored | An explicit `WAMCP_TOOLS` overrides a profile | Call `get_server_info` and read `profile_error` |
+| A profile name is rejected | Wrong name, or `"enable": false` | `config --list` shows both |
 | Tools missing when launched from a client | The variables are not in the client's `env` block | See step 8 |
 | `COMMAND_NOT_ALLOWED` from `run_powershell` | Only one allowlisted program per call — no `;`, `|` or `>` | Split it into separate calls |
+
+### Is the model any good at using it?
+
+A working server and a model that uses it well are different things, and
+only the first is covered by the tests. Before trusting a model with your
+project, try it on a throwaway copy and watch which tool it reaches for:
+
+- Ask it to find every file mentioning some symbol. One `search_files`, or
+  twenty `read_file` calls?
+- Ask it to change one constant in a large file. `edit_file`, or
+  `write_file` regenerating the whole thing from memory? **A model that
+  does the latter should not be given write access** — check the file's
+  line count afterwards, because the transcript will not show the damage.
+- Ask it to read a page on a host you have not allowed. Does it report the
+  host to you and stop, or try three more paths on it?
 
 ### Still stuck?
 

@@ -226,7 +226,7 @@ def run_powershell(
         command: PowerShell command to execute. Must be in the allowlist.
         timeout_seconds: Execution timeout in seconds (1-600). Defaults to 300.
         working_directory: Directory to run in. Must be inside the download
-            root or a root listed in BIONIC_PROJECT_ROOTS. Defaults to the
+            root or a root listed in WAMCP_PROJECT_ROOTS. Defaults to the
             download root. Each call is a separate process, so `cd` does not
             persist between calls -- pass this instead.
 
@@ -272,7 +272,7 @@ def run_powershell(
             recovery=[
                 "DO NOT retry the identical working_directory.",
                 "Omit working_directory to run in the default download root.",
-                "Ask the user to add the directory to BIONIC_PROJECT_ROOTS "
+                "Ask the user to add the directory to WAMCP_PROJECT_ROOTS "
                 "if the command needs to run there.",
             ],
         )

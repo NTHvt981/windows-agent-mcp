@@ -324,13 +324,13 @@ def test_resolve_working_directory_reports_an_unresolvable_path(
 def test_an_unresolvable_configured_root_is_skipped(
     tmp_path, monkeypatch, isolated_download_root
 ) -> None:
-    """One stale BIONIC_PROJECT_ROOTS entry must not disable the tool."""
+    """One stale WAMCP_PROJECT_ROOTS entry must not disable the tool."""
 
     good = tmp_path / "good"
     good.mkdir()
 
     monkeypatch.setenv(
-        "BIONIC_PROJECT_ROOTS",
+        "WAMCP_PROJECT_ROOTS",
         f"{tmp_path / 'does-not-exist'};{good}",
     )
 
@@ -350,7 +350,7 @@ def test_a_root_that_raises_on_resolve_is_skipped(
             raise OSError("device not ready")
         return real(self, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setenv("BIONIC_PROJECT_ROOTS", str(tmp_path / "hostile"))
+    monkeypatch.setenv("WAMCP_PROJECT_ROOTS", str(tmp_path / "hostile"))
     monkeypatch.setattr(Path, "resolve", selective)
 
     assert get_allowed_working_directories() == [isolated_download_root]
@@ -451,7 +451,7 @@ def test_warning_list_is_capped() -> None:
 def test_server_info_reports_research_mode(monkeypatch) -> None:
     import json
 
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     payload = json.loads(get_server_info())
 

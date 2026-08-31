@@ -99,27 +99,29 @@ def get_server_info() -> str:
     groups, groups_error = active_tool_groups()
 
     # Imported lazily: main imports every tool module, so importing it at module
-    # scope here would be a cycle (main -> get_server_info -> main). profiles
+    # scope here would be a cycle (main -> get_server_info -> main). config
     # imports main, so it has the same constraint.
+    from ..config import find_config_file, load_config, resolve_profile
     from ..main import get_tools
-    from ..profiles import find_profiles_file, load_profiles, resolve_profile
 
-    profiles_file = find_profiles_file()
-
-    profile_error: str | None = None
+    config_file = find_config_file()
 
     # Recomputed rather than cached from startup: no module state to go stale,
     # and the cost is one small file read on a call that already shells out to
     # nothing.
-    requested_profile = os.environ.get(PROFILE_ENV_VAR, "").strip()
+    config, config_errors = load_config(config_file)
 
-    if requested_profile:
-        loaded, load_errors = load_profiles(profiles_file)
+    config_error: str | None = config_errors[0] if config_errors else None
 
-        if load_errors:
-            profile_error = load_errors[0]
-        else:
-            _profile, profile_error = resolve_profile(requested_profile, loaded)
+    active_profile = (
+        os.environ.get(PROFILE_ENV_VAR, "").strip() or config.active_profile
+    )
+
+    if active_profile and config_error is None:
+        _profile, profile_error = resolve_profile(active_profile, config.profiles)
+
+        if profile_error is not None:
+            config_error = profile_error
 
     return json.dumps(
         {
@@ -135,18 +137,19 @@ def get_server_info() -> str:
             "available_tool_groups": sorted(VALID_TOOL_GROUPS),
             "registered_tool_count": len(get_tools(groups=groups)),
             "tool_groups_error": groups_error,
-            # A profile is the friendlier way to select groups, so a wrong or
-            # disabled one is a likely cause of "my tool is missing" and has to
-            # be visible here rather than only in the startup log.
-            "profile": os.environ.get(PROFILE_ENV_VAR) or None,
-            "profiles_file": str(profiles_file),
-            "profile_error": profile_error,
+            # The config file is where every setting now lives, so a problem
+            # with it is the likeliest cause of "my tool is missing" or "my
+            # project root is not set" -- and it has to be visible here rather
+            # than only in the startup log.
+            "config_file": str(config_file),
+            "config_error": config_error,
+            "active_profile": active_profile or None,
             "download_root": str(get_download_root()),
             "network_policy": network_policy,
             "max_download_mb": MAX_DOWNLOAD_BYTES // (1024 * 1024),
             "max_http_mb": MAX_HTTP_BYTES // (1024 * 1024),
             # The single most common cause of a refused write or build: the
-            # operator never set BIONIC_PROJECT_ROOTS, so the only writable
+            # operator never set WAMCP_PROJECT_ROOTS, so the only writable
             # place is the download sandbox. Reporting it turns "permission
             # denied" into something the model can explain to the user.
             "writable_roots": [str(root) for root in writable],

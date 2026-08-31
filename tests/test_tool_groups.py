@@ -125,7 +125,7 @@ def test_get_server_info_is_in_core() -> None:
 def test_core_is_read_only() -> None:
     """core must never contain a tool that writes, executes or reaches out.
 
-    That is what makes `BIONIC_TOOLS=core` a safe posture to hand to something
+    That is what makes `WAMCP_TOOLS=core` a safe posture to hand to something
     untrusted, and it is a property that would erode silently as tools are
     added to the group for convenience.
     """
@@ -240,7 +240,7 @@ def test_web_research_env_var_implicitly_adds_the_research_group(
 ) -> None:
     """The compatibility path: --web and every pre-groups config still work."""
 
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     groups, _error = active_tool_groups()
 
@@ -254,28 +254,28 @@ def test_the_alias_applies_even_to_a_narrow_group_list(
     """Avoids the half-state where the posture widens but web_search is gone."""
 
     monkeypatch.setenv(TOOL_GROUPS_ENV_VAR, "core")
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     assert active_tool_groups()[0] == frozenset({"core", "research"})
 
 
 @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
 def test_alias_truthy_values(value: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", value)
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", value)
 
     assert "research" in active_tool_groups()[0]
 
 
 @pytest.mark.parametrize("value", ["0", "false", "no", "off", "", "maybe"])
 def test_alias_non_truthy_values(value: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", value)
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", value)
 
     assert "research" not in active_tool_groups()[0]
 
 
 def test_group_error_survives_the_alias(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(TOOL_GROUPS_ENV_VAR, "bogus")
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     groups, error = active_tool_groups()
 
@@ -297,7 +297,7 @@ def test_research_enabled_via_the_group(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_research_enabled_via_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     assert web_research_enabled() is True
 
@@ -455,11 +455,11 @@ def test_get_tools_ignores_the_environment(monkeypatch: pytest.MonkeyPatch) -> N
     """Purity keeps the suite independent of the developer's shell.
 
     pre-commit runs these tests, so an env-reading get_tools would stop anyone
-    who actually uses BIONIC_TOOLS from committing.
+    who actually uses WAMCP_TOOLS from committing.
     """
 
     monkeypatch.setenv(TOOL_GROUPS_ENV_VAR, "core")
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     assert get_tools() == TOOLS
 
@@ -587,7 +587,7 @@ def test_main_logs_a_bad_group_name(monkeypatch: pytest.MonkeyPatch, caplog) -> 
 def test_main_still_honours_the_web_research_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     server = RecordingServer()
 
@@ -603,7 +603,7 @@ def test_main_still_honours_the_web_research_alias(
 # The `search` group
 # ============================================================
 #
-# Exists because BIONIC_WEB_RESEARCH gated two unrelated permissions with one
+# Exists because WAMCP_WEB_RESEARCH gated two unrelated permissions with one
 # switch: "may run web_search" and "may read any public host". The posture that
 # actually suits a small model -- find URLs, but still ask before reading an
 # unvetted host -- was therefore inexpressible, and a model with a page reader
@@ -623,7 +623,7 @@ def test_search_does_not_widen_which_hosts_may_be_read(
     another name and the split would buy nothing.
     """
 
-    monkeypatch.setenv("BIONIC_TOOLS", "core,docs,search")
+    monkeypatch.setenv("WAMCP_TOOLS", "core,docs,search")
 
     assert web_search_enabled() is True
     assert web_research_enabled() is False
@@ -632,7 +632,7 @@ def test_search_does_not_widen_which_hosts_may_be_read(
 def test_research_still_enables_search(monkeypatch: pytest.MonkeyPatch) -> None:
     """`research` is a strict superset, so an existing config loses nothing."""
 
-    monkeypatch.setenv("BIONIC_TOOLS", "core,research")
+    monkeypatch.setenv("WAMCP_TOOLS", "core,research")
 
     assert web_search_enabled() is True
     assert web_research_enabled() is True
@@ -641,16 +641,16 @@ def test_research_still_enables_search(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_the_legacy_variable_still_enables_search(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """BIONIC_WEB_RESEARCH=1 predates groups and must keep working."""
+    """WAMCP_WEB_RESEARCH=1 predates groups and must keep working."""
 
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     assert web_search_enabled() is True
     assert web_research_enabled() is True
 
 
 def test_neither_group_means_no_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BIONIC_TOOLS", "core,docs,edit,build,net")
+    monkeypatch.setenv("WAMCP_TOOLS", "core,docs,edit,build,net")
 
     assert web_search_enabled() is False
     assert web_research_enabled() is False
@@ -677,7 +677,7 @@ def test_web_search_runs_under_the_search_group(
     The stubbed backend means this asserts the gate, not the network.
     """
 
-    monkeypatch.setenv("BIONIC_TOOLS", "core,docs,search")
+    monkeypatch.setenv("WAMCP_TOOLS", "core,docs,search")
 
     search_opener(FakeResponse(_ddg_results("https://found.example.com/a")))
 
@@ -696,7 +696,7 @@ def test_a_found_url_is_still_not_readable(
     loop is the reason this group is separate from `research`.
     """
 
-    monkeypatch.setenv("BIONIC_TOOLS", "core,docs,search")
+    monkeypatch.setenv("WAMCP_TOOLS", "core,docs,search")
 
     clear_cache()
     page_opener()
@@ -746,7 +746,7 @@ def test_get_server_info_reports_search_separately_from_research(
 ) -> None:
     """Otherwise a server where web_search works reports no backend at all."""
 
-    monkeypatch.setenv("BIONIC_TOOLS", "core,docs,search")
+    monkeypatch.setenv("WAMCP_TOOLS", "core,docs,search")
 
     payload = json.loads(get_server_info())
 

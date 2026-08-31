@@ -573,7 +573,7 @@ def test_default_backend_is_duckduckgo() -> None:
 
 
 def test_env_var_selects_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BIONIC_SEARCH_BACKEND", "DuckDuckGo")
+    monkeypatch.setenv("WAMCP_SEARCH_BACKEND", "DuckDuckGo")
 
     assert get_backend().name == "duckduckgo"
 
@@ -588,7 +588,7 @@ def test_unknown_backend_raises_rather_than_falling_back(
     DuckDuckGo.
     """
 
-    monkeypatch.setenv("BIONIC_SEARCH_BACKEND", name)
+    monkeypatch.setenv("WAMCP_SEARCH_BACKEND", name)
 
     with pytest.raises(ValueError, match="Unknown search backend"):
         get_backend()
@@ -597,7 +597,7 @@ def test_unknown_backend_raises_rather_than_falling_back(
 def test_unknown_backend_error_lists_valid_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("BIONIC_SEARCH_BACKEND", "nope")
+    monkeypatch.setenv("WAMCP_SEARCH_BACKEND", "nope")
 
     with pytest.raises(ValueError, match="duckduckgo"):
         get_backend()

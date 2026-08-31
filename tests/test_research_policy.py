@@ -47,7 +47,7 @@ def _resolve_to(*addresses: str):
 def test_research_enabled_for_truthy_values(
     value: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", value)
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", value)
 
     assert web_research_enabled() is True
 
@@ -56,7 +56,7 @@ def test_research_enabled_for_truthy_values(
 def test_research_disabled_for_everything_else(
     value: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", value)
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", value)
 
     assert web_research_enabled() is False
 

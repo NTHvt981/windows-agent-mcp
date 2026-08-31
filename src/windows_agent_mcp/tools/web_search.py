@@ -82,7 +82,7 @@ def web_search(query: str, max_results: int = MAX_SEARCH_RESULTS) -> str:
             str(exc),
             recovery=[
                 "DO NOT retry: this is a server misconfiguration, not a bad query.",
-                "Tell the user the BIONIC_SEARCH_BACKEND value is not valid.",
+                "Tell the user the WAMCP_SEARCH_BACKEND value is not valid.",
             ],
         )
 

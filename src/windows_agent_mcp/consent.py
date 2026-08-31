@@ -20,7 +20,7 @@ Two limits worth knowing before relying on this:
 * **An accepted elicitation is not proof a human saw it.** The spec explicitly
   allows an agentic client to answer on the user's behalf. That is why an
   approval here grants for the current process only, unless the operator has
-  set BIONIC_HOST_GRANT_PERSIST=1 to say their client really does ask a person.
+  set WAMCP_HOST_GRANT_PERSIST=1 to say their client really does ask a person.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ __all__: list[str] = [
 # is a prompt an injected page can trigger, and an operator who does not want
 # to be asked repeatedly -- or does not want a habit of clicking "allow" --
 # should be able to turn the question off without losing the file mechanism.
-CONSENT_ENV_VAR: str = "BIONIC_HOST_CONSENT"
+CONSENT_ENV_VAR: str = "WAMCP_HOST_CONSENT"
 
 _FALSY_VALUES = frozenset({"0", "false", "no", "off"})
 

@@ -2,7 +2,7 @@
 
 This module exists because of a bug that was invisible for a while: the MCP
 SDK's stdio client spawns a server with a FIXED environment allowlist rather
-than the parent environment, so under `run_server.bat --dev` every BIONIC_*
+than the parent environment, so under `run_server.bat --dev` every WAMCP_*
 variable silently vanished. `--tools core,docs` registered all 17 tools,
 `--web` gave a server with research mode off, and a project root set for a
 --dev session left writes confined to the download sandbox.
@@ -39,33 +39,33 @@ def server_entry(config: dict) -> dict:
 
 
 def test_config_names_the_command_and_module() -> None:
-    config = build_config("S:/mcp-server/.venv/Scripts/python.exe", {})
+    config = build_config("C:/projects/windows-agent-mcp/.venv/Scripts/python.exe", {})
 
     entry = server_entry(config)
 
-    assert entry["command"] == "S:/mcp-server/.venv/Scripts/python.exe"
+    assert entry["command"] == "C:/projects/windows-agent-mcp/.venv/Scripts/python.exe"
     assert entry["args"] == ["-m", "windows_agent_mcp"]
 
 
 def test_backslashes_become_forward_slashes() -> None:
     """The path lands in JSON, where a lone backslash is an invalid escape."""
 
-    config = build_config(r"S:\mcp-server\.venv\Scripts\python.exe", {})
+    config = build_config(r"C:\projects\windows-agent-mcp\.venv\Scripts\python.exe", {})
 
     command = server_entry(config)["command"]
 
     assert "\\" not in command
-    assert command == "S:/mcp-server/.venv/Scripts/python.exe"
+    assert command == "C:/projects/windows-agent-mcp/.venv/Scripts/python.exe"
 
 
 def test_config_serialises_to_valid_json() -> None:
     config = build_config(
-        r"C:\Program Files\Python\python.exe", {"BIONIC_TOOLS": "core"}
+        r"C:\Program Files\Python\python.exe", {"WAMCP_TOOLS": "core"}
     )
 
     reloaded = json.loads(json.dumps(config))
 
-    assert server_entry(reloaded)["env"]["BIONIC_TOOLS"] == "core"
+    assert server_entry(reloaded)["env"]["WAMCP_TOOLS"] == "core"
 
 
 def test_single_server_named_for_the_launcher_flag() -> None:
@@ -96,7 +96,7 @@ def test_every_variable_the_server_reads_is_forwarded() -> None:
         utils.WEB_RESEARCH_ENV_VAR,
         utils.SEARCH_BACKEND_ENV_VAR,
         utils.PROJECT_ROOTS_ENV_VAR,
-        "BIONIC_DOWNLOAD_ROOT",
+        "WAMCP_DOWNLOAD_ROOT",
     }
 
     assert required <= set(FORWARDED_ENV_VARS)
@@ -119,16 +119,16 @@ def test_unset_variables_are_omitted() -> None:
     """Writing a variable nobody set invites a future truthiness change to
     turn a feature on by accident."""
 
-    config = build_config("python", {"BIONIC_TOOLS": "core"})
+    config = build_config("python", {"WAMCP_TOOLS": "core"})
 
     env = server_entry(config)["env"]
 
-    assert env == {"BIONIC_TOOLS": "core"}
+    assert env == {"WAMCP_TOOLS": "core"}
 
 
 @pytest.mark.parametrize("value", ["", "   ", "\t"])
 def test_blank_variables_are_omitted(value: str) -> None:
-    config = build_config("python", {"BIONIC_TOOLS": value})
+    config = build_config("python", {"WAMCP_TOOLS": value})
 
     assert server_entry(config)["env"] == {}
 
@@ -139,7 +139,7 @@ def test_unrelated_variables_are_not_leaked() -> None:
     config = build_config(
         "python",
         {
-            "BIONIC_TOOLS": "core",
+            "WAMCP_TOOLS": "core",
             "AWS_SECRET_ACCESS_KEY": "should-not-travel",
             "GITHUB_TOKEN": "should-not-travel",
         },
@@ -158,11 +158,11 @@ def test_empty_environment_yields_an_empty_block() -> None:
 
 
 def test_defaults_to_the_process_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BIONIC_TOOLS", "edit,build")
+    monkeypatch.setenv("WAMCP_TOOLS", "edit,build")
 
     config = build_config("python")
 
-    assert server_entry(config)["env"]["BIONIC_TOOLS"] == "edit,build"
+    assert server_entry(config)["env"]["WAMCP_TOOLS"] == "edit,build"
 
 
 # ============================================================
@@ -173,14 +173,14 @@ def test_defaults_to_the_process_environment(monkeypatch: pytest.MonkeyPatch) ->
 def test_main_writes_the_file(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "nested" / "inspector.json"
 
-    monkeypatch.setenv("BIONIC_TOOLS", "core,docs")
+    monkeypatch.setenv("WAMCP_TOOLS", "core,docs")
     monkeypatch.setattr(sys, "argv", ["prog", str(target), "C:/py/python.exe"])
 
     assert main() == 0
 
     config = json.loads(target.read_text(encoding="utf-8"))
 
-    assert server_entry(config)["env"]["BIONIC_TOOLS"] == "core,docs"
+    assert server_entry(config)["env"]["WAMCP_TOOLS"] == "core,docs"
     assert server_entry(config)["command"] == "C:/py/python.exe"
 
 

@@ -91,7 +91,7 @@ def research_disabled_error(tool: str) -> str:
         "Web search is not enabled on this server.",
         recovery=[
             "DO NOT retry: no request will succeed until it is enabled.",
-            "Tell the user to set BIONIC_WEB_RESEARCH=1 and restart the "
+            "Tell the user to set WAMCP_WEB_RESEARCH=1 and restart the "
             "server if they want web access.",
         ],
     )

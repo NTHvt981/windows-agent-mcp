@@ -167,7 +167,7 @@ def test_the_operator_can_switch_asking_off(
     a separate switch from the grants file rather than a mode.
     """
 
-    monkeypatch.setenv("BIONIC_HOST_CONSENT", "0")
+    monkeypatch.setenv("WAMCP_HOST_CONSENT", "0")
 
     clear_cache()
     page_opener()
@@ -217,7 +217,7 @@ def test_a_refusal_a_grant_cannot_fix_asks_nothing(
 def test_research_mode_needs_no_consent(
     page_opener, resolves_public: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     clear_cache()
     page_opener(page())
@@ -365,7 +365,7 @@ def test_an_unanswered_question_times_out(
 def test_always_writes_the_grant_to_the_file(
     page_opener, resolves_public: None, grants_file: Path, monkeypatch
 ) -> None:
-    monkeypatch.setenv("BIONIC_HOST_GRANT_PERSIST", "1")
+    monkeypatch.setenv("WAMCP_HOST_GRANT_PERSIST", "1")
 
     clear_cache()
     page_opener(page())
@@ -382,7 +382,7 @@ def test_always_writes_the_grant_to_the_file(
 def test_session_does_not_write_the_grant_to_the_file(
     page_opener, resolves_public: None, grants_file: Path, monkeypatch
 ) -> None:
-    monkeypatch.setenv("BIONIC_HOST_GRANT_PERSIST", "1")
+    monkeypatch.setenv("WAMCP_HOST_GRANT_PERSIST", "1")
 
     clear_cache()
     page_opener(page())
@@ -398,7 +398,7 @@ def test_session_does_not_write_the_grant_to_the_file(
 def test_no_in_the_three_way_question_is_still_no(
     page_opener, resolves_public: None, monkeypatch
 ) -> None:
-    monkeypatch.setenv("BIONIC_HOST_GRANT_PERSIST", "1")
+    monkeypatch.setenv("WAMCP_HOST_GRANT_PERSIST", "1")
 
     clear_cache()
     page_opener()
@@ -418,7 +418,7 @@ def test_a_failed_write_does_not_lose_the_session_grant(
     user for a filesystem problem they did not cause.
     """
 
-    monkeypatch.setenv("BIONIC_HOST_GRANT_PERSIST", "1")
+    monkeypatch.setenv("WAMCP_HOST_GRANT_PERSIST", "1")
 
     grants_file.write_text("{not json", encoding="utf-8")
 
@@ -440,7 +440,7 @@ def test_the_question_matches_the_persistence_setting(
     run(request_host_grant(ctx, HOST, URL))
     assert ctx.calls[0]["schema"] is _AllowHost
 
-    monkeypatch.setenv("BIONIC_HOST_GRANT_PERSIST", "1")
+    monkeypatch.setenv("WAMCP_HOST_GRANT_PERSIST", "1")
 
     ctx = FakeContext(accepted_decision("session"))
     run(request_host_grant(ctx, HOST, URL))
@@ -532,7 +532,7 @@ def test_a_cancelled_three_way_question_is_not_an_approval(
 ) -> None:
     """Cancelling the persistable prompt has its own branch to get wrong."""
 
-    monkeypatch.setenv("BIONIC_HOST_GRANT_PERSIST", "1")
+    monkeypatch.setenv("WAMCP_HOST_GRANT_PERSIST", "1")
 
     clear_cache()
     page_opener()

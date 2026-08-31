@@ -18,7 +18,7 @@ This MCP server provides a set of tools for interacting with the Windows filesys
 - `search_files` - Search file contents recursively
 
 ### Write
-Confined to the download root plus any directory in `BIONIC_PROJECT_ROOTS`.
+Confined to the download root plus any directory in `WAMCP_PROJECT_ROOTS`.
 With that variable unset, a default install **cannot modify source code**.
 - `write_file` - Create a file, or replace one with `overwrite=true`
 - `edit_file` - Replace an exact string, preserving the file's line endings
@@ -36,7 +36,7 @@ With that variable unset, a default install **cannot modify source code**.
   unless research mode is on
 
 ### Web Research Tools (opt-in)
-Registered **only** when `BIONIC_WEB_RESEARCH=1`. See
+Registered **only** when `WAMCP_WEB_RESEARCH=1`. See
 [Web research](#web-research) before enabling.
 - `web_search` - Search the web for titles, URLs and snippets
 
@@ -66,14 +66,14 @@ Registered **only** when `BIONIC_WEB_RESEARCH=1`. See
 ### Filesystem Safety
 - **Writes are confined.** `write_file`, `edit_file` and `compile_shader`
   output may only land in the download root or a directory the operator listed
-  in `BIONIC_PROJECT_ROOTS`. `..` and symlinked parents are resolved *before*
+  in `WAMCP_PROJECT_ROOTS`. `..` and symlinked parents are resolved *before*
   the containment check, so neither escapes it
 - Writes are atomic: content goes to a temporary file in the same directory
   and is renamed into place, so an interrupted write cannot leave a truncated
   source file
 - `write_file` refuses to overwrite unless asked, and points at `edit_file`
 - **The server's own trust files cannot be written by a tool.** Any path named
-  `mcp-allowed-hosts.json` or `mcp-profiles.json` is refused with
+  `mcp-allowed-hosts.json`, or ending `input/config.json`, is refused with
   `PROTECTED_PATH`, anywhere on disk and whether or not it exists. Those files
   decide which hosts are readable and which directories are writable, so a
   model that could write one could widen its own permissions. The check is by
@@ -81,7 +81,7 @@ Registered **only** when `BIONIC_WEB_RESEARCH=1`. See
   *creating* one in a directory that gets searched first
 - Reads are deliberately **not** confined, matching `read_file`'s existing
   behaviour: a bad read costs context, a bad write costs work
-- All downloads go to a single root (configurable via `BIONIC_DOWNLOAD_ROOT`)
+- All downloads go to a single root (configurable via `WAMCP_DOWNLOAD_ROOT`)
 - Path traversal prevention; an existing file is never overwritten
 - Filename sanitization: path components stripped, Windows-invalid characters
   and control characters replaced, reserved device names escaped (including
@@ -100,7 +100,7 @@ Registered **only** when `BIONIC_WEB_RESEARCH=1`. See
 - Encoded-payload detection (UTF-8 and PowerShell's UTF-16-LE
   `-EncodedCommand` form)
 - Execution confined to the download root, or roots the operator lists in
-  `BIONIC_PROJECT_ROOTS`
+  `WAMCP_PROJECT_ROOTS`
 - Output truncation to prevent context flooding
 
 > **What the allowlist does and does not guarantee.** It guarantees that
@@ -121,7 +121,7 @@ decide how much you should trust it:
    started program then does.
 
 2. **Write access plus command execution is a code-execution loop.** Once
-   `BIONIC_PROJECT_ROOTS` is set, the model can write a file into a tree and
+   `WAMCP_PROJECT_ROOTS` is set, the model can write a file into a tree and
    then run a build that executes it — and `python build.py` runs whatever that
    file contains. No allowlist prevents this, because running project scripts
    is what the tool is for. This is the intended capability of a coding
@@ -142,7 +142,7 @@ The short version:
 
 ```bash
 python bootstrap.py                                 # install
-set BIONIC_PROJECT_ROOTS=C:\path\to\your\project    # allow writes and builds there
+set WAMCP_PROJECT_ROOTS=C:\path\to\your\project    # allow writes and builds there
 run_server.bat --dev                                # run, with the Inspector UI
 ```
 
@@ -152,7 +152,7 @@ To copy the project to another machine:
 python package.py        # dist/windows-agent-mcp-<version>.zip
 ```
 
-Unzip it there and run `python bootstrap.py`. `.venv` and `mcp-profiles.json`
+Unzip it there and run `python bootstrap.py`. `.venv` and `input/config.json`
 are deliberately excluded — both are machine-specific and are recreated on the
 target. See
 [docs/HOW_TO_USE.md](docs/HOW_TO_USE.md#2-copy-it-to-another-machine).
@@ -342,7 +342,7 @@ Execute a restricted PowerShell development command.
 - `command` (string): PowerShell command to execute
 - `timeout_seconds` (integer, optional): Timeout in seconds (1-600). Defaults to 300
 - `working_directory` (string, optional): Directory to run in. Must be inside
-  the download root or a root listed in `BIONIC_PROJECT_ROOTS`. Defaults to the
+  the download root or a root listed in `WAMCP_PROJECT_ROOTS`. Defaults to the
   download root.
 
 Each call is a separate process, so an allowlisted `cd` does **not** persist
@@ -413,7 +413,7 @@ Create a text file, or replace one entirely.
 
 **Parameters:**
 - `path` (string): Destination. Must be inside the download root or a
-  `BIONIC_PROJECT_ROOTS` directory
+  `WAMCP_PROJECT_ROOTS` directory
 - `content` (string): Full text to write
 - `overwrite` (boolean, optional): Allow replacing an existing file. Defaults
   to false
@@ -468,7 +468,7 @@ Run a build and return parsed diagnostics instead of a raw log.
 **Parameters:**
 - `command` (string): Build command, e.g. `"cmake --build build --config Debug"`
 - `working_directory` (string, optional): Must be inside the download root or a
-  `BIONIC_PROJECT_ROOTS` directory
+  `WAMCP_PROJECT_ROOTS` directory
 - `timeout_seconds` (integer, optional): 1–1800. Defaults to 600
 
 **Returns:** Unique errors first with file, line and code, each carrying a
@@ -562,7 +562,7 @@ actually enable.
 
 ### `web_search(query, max_results=5)`
 
-Search the web. **Requires `BIONIC_WEB_RESEARCH=1`** — otherwise the tool is
+Search the web. **Requires `WAMCP_WEB_RESEARCH=1`** — otherwise the tool is
 not registered at all.
 
 **Parameters:**
@@ -586,7 +586,7 @@ retry indefinitely.
 
 Read a web page as plain text. Registered always. By default it may read the
 [documentation hosts](#documentation-hosts), the network allowlist, and any
-[granted host](#granting-one-host); with `BIONIC_WEB_RESEARCH=1` it may read
+[granted host](#granting-one-host); with `WAMCP_WEB_RESEARCH=1` it may read
 any public HTTPS host.
 
 **Parameters:**
@@ -651,19 +651,19 @@ Get system information about the host machine.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `BIONIC_TOOLS` | Comma-separated tool groups to register: `core` `edit` `build` `docs` `net` `search` `research`, or `all`. `core` is always included. See [Tool groups](#tool-groups) | *(unset - everything except `search` and `research`)* |
-| `BIONIC_PROFILE` | Named profile from `mcp-profiles.json`. A friendlier way to select groups. See [Profiles](#profiles) | *(unset)* |
-| `BIONIC_PROFILES_FILE` | Path to the profiles file, if not `./mcp-profiles.json` | *(unset)* |
-| `BIONIC_DOWNLOAD_ROOT` | Sandbox directory for downloads | `%LOCALAPPDATA%\windows-agent-mcp\downloads` |
-| `BIONIC_PROJECT_ROOTS` | Roots that `run_powershell`, `build_project` and `compile_shader` may execute inside, **and** that `write_file` / `edit_file` may write to. `;`-separated | *(unset — download root only)* |
-| `BIONIC_WEB_RESEARCH` | Set to `1` to register `web_search` and allow `fetch_web_page` to reach any public host | *(unset — documentation hosts only)* |
-| `BIONIC_EXTRA_DOC_HOSTS` | Extra hostnames `fetch_web_page` may **read**, `,`- or `;`-separated. Merged with `mcp-allowed-hosts.json`. See [Granting one host](#granting-one-host) | *(unset)* |
-| `BIONIC_ALLOWED_HOSTS_FILE` | Path to the granted-hosts file, if not `./mcp-allowed-hosts.json` | *(unset)* |
-| `BIONIC_HOST_CONSENT` | Set to `0` to stop the server ever prompting you to approve a host | `1` |
-| `BIONIC_HOST_GRANT_PERSIST` | Set to `1` to let an approval be written back to the grants file | *(unset — approvals last until restart)* |
-| `BIONIC_SEARCH_BACKEND` | Search provider. Only `duckduckgo` is implemented; an unrecognised value is an error, not a silent fallback | `duckduckgo` |
+| `WAMCP_TOOLS` | Comma-separated tool groups to register: `core` `edit` `build` `docs` `net` `search` `research`, or `all`. `core` is always included. See [Tool groups](#tool-groups) | *(unset - everything except `search` and `research`)* |
+| `WAMCP_PROFILE` | Named profile from `input/config.json`. A friendlier way to select groups. See [The config file](#the-config-file) | *(unset)* |
+| `WAMCP_CONFIG_FILE` | Path to the config file, if not `./input/config.json` | *(unset)* |
+| `WAMCP_DOWNLOAD_ROOT` | Sandbox directory for downloads | `%LOCALAPPDATA%\windows-agent-mcp\downloads` |
+| `WAMCP_PROJECT_ROOTS` | Roots that `run_powershell`, `build_project` and `compile_shader` may execute inside, **and** that `write_file` / `edit_file` may write to. `;`-separated | *(unset — download root only)* |
+| `WAMCP_WEB_RESEARCH` | Set to `1` to register `web_search` and allow `fetch_web_page` to reach any public host | *(unset — documentation hosts only)* |
+| `WAMCP_EXTRA_DOC_HOSTS` | Extra hostnames `fetch_web_page` may **read**, `,`- or `;`-separated. Merged with `mcp-allowed-hosts.json`. See [Granting one host](#granting-one-host) | *(unset)* |
+| `WAMCP_ALLOWED_HOSTS_FILE` | Path to the granted-hosts file, if not `./mcp-allowed-hosts.json` | *(unset)* |
+| `WAMCP_HOST_CONSENT` | Set to `0` to stop the server ever prompting you to approve a host | `1` |
+| `WAMCP_HOST_GRANT_PERSIST` | Set to `1` to let an approval be written back to the grants file | *(unset — approvals last until restart)* |
+| `WAMCP_SEARCH_BACKEND` | Search provider. Only `duckduckgo` is implemented; an unrecognised value is an error, not a silent fallback | `duckduckgo` |
 
-> **`BIONIC_PROJECT_ROOTS` is the single consent switch for touching your
+> **`WAMCP_PROJECT_ROOTS` is the single consent switch for touching your
 > project.** Setting it grants both execution *and* write access to those
 > directories. That is deliberate rather than lax: granting the right to run
 > `cmake` inside a tree and the right to edit files in it is the same trust
@@ -674,10 +674,10 @@ Get system information about the host machine.
 ### Tool groups
 
 Tools are organised into groups so a session registers only what it needs.
-`BIONIC_TOOLS` selects them:
+`WAMCP_TOOLS` selects them:
 
 ```bash
-BIONIC_TOOLS=edit,build,docs
+WAMCP_TOOLS=edit,build,docs
 ```
 
 | Group | Tools | ≈ tokens |
@@ -699,7 +699,7 @@ groups — so upgrading never hands an install a new outbound tool.
 
 Useful profiles:
 
-| `BIONIC_TOOLS` | Tools | ≈ tokens | For |
+| `WAMCP_TOOLS` | Tools | ≈ tokens | For |
 |---|---|---|---|
 | `core` | 7 | 968 | Read-only exploration. Cannot write, execute or reach the network |
 | `core,docs` | 8 | 1,315 | Reading code plus spec lookup |
@@ -714,12 +714,12 @@ because "build and review this, but do not touch my files" is a real posture
 and is only expressible if the two are distinct. `docs` and `net` are separate
 because `docs` only reads into context while `net` writes bytes to disk.
 
-> **`research` in `BIONIC_TOOLS` widens the network posture on its own.** It is
+> **`research` in `WAMCP_TOOLS` widens the network posture on its own.** It is
 > an ordinary group, so listing it registers `web_search` *and* lets
 > `fetch_web_page` reach any public HTTPS host. That means a context-economy
 > setting also changes a security setting — one variable to reason about
 > instead of two. Read [Web research](#web-research) before using it.
-> `BIONIC_WEB_RESEARCH=1` still works and is equivalent to adding `research`.
+> `WAMCP_WEB_RESEARCH=1` still works and is equivalent to adding `research`.
 
 An unrecognised group name does **not** stop the server. It logs a warning to
 stderr, falls back to the default set, and reports the message in
@@ -728,74 +728,85 @@ an MCP client as an opaque connection failure; this way the mistake is visible
 and the model can tell you about it, without a typo silently handing you a
 different tool set.
 
-### Profiles
+### The config file
 
-Typing `BIONIC_TOOLS=edit,build,docs` works but is unpleasant to live with: the
-useful combinations have to be remembered, and there is nowhere to record why
-one exists. A profile gives a combination a name, a description and an
-`enable` flag.
-
-Create the file — it is **gitignored**, because it holds machine-specific
-paths:
-
-```bash
-.venv\Scripts\python.exe -m windows_agent_mcp.profiles --init
-```
-
-That writes `mcp-profiles.json`:
+Every setting lives in `input/config.json`. It is **generated on the first run**
+with the complete table — each setting, its default and what it does — so the
+options are discoverable by opening the file rather than by reading
+documentation. It is **gitignored**, because it holds paths to your projects.
 
 ```json
 {
   "version": 1,
+  "settings": {
+    "WAMCP_PROJECT_ROOTS": {
+      "value": "C:/path/to/your/project",
+      "default": "the download sandbox only",
+      "description": "Directories the model may WRITE to and RUN builds in..."
+    },
+    "WAMCP_TOOLS": {
+      "value": "",
+      "default": "edit,build,docs,net (everything except search and research)",
+      "description": "Tool groups to register..."
+    }
+  },
+  "active_profile": "",
   "profiles": {
     "cpp": {
       "enable": true,
-      "description": "C++ / Vulkan development. 14 tools.",
+      "description": "C++ / Vulkan development.",
       "tools": "edit,build,docs",
-      "env": { "BIONIC_PROJECT_ROOTS": "C:/path/to/your/project" }
-    },
-    "research": {
-      "enable": false,
-      "description": "Widens the network posture. Read the README first.",
-      "tools": "core,docs,research"
+      "settings": { "WAMCP_PROJECT_ROOTS": "C:/path/to/your/project" }
     }
   }
 }
 ```
 
-Use one:
+Fill in `value` to change a setting; leave it empty for the default beside it.
+A plain string works too — `"WAMCP_TOOLS": "core,docs"` — for editing by hand.
+
+**An environment variable still wins.** The file supplies values; anything
+explicitly set in the environment overrides it for that run. That is not a
+compromise: for some MCP clients an `env` block is the only way to configure a
+server at all, and it means one run can be overridden without editing the file.
+The override is reported on stderr and in `get_server_info`, because a silently
+ignored setting is exactly the confusion the file exists to remove.
+
+#### Profiles
+
+A profile names a combination of tool groups, with a description and an
+`enable` flag, in the same file.
+
+| Field | Meaning |
+|---|---|
+| `enable` | Optional, defaults to `true`. `false` **parks** a profile: it is not emitted to client config, and selecting it is refused as *disabled* rather than *not found* |
+| `description` | Shown by `--list`. Nothing is committed, so this is where the reason for a profile lives |
+| `tools` | A `WAMCP_TOOLS` string, validated at load |
+| `settings` | Extra settings applied when the profile is active. Setting `WAMCP_TOOLS` here is an error — it duplicates `tools` |
+
+Select one with `active_profile` in the file, `WAMCP_PROFILE` in the
+environment, or:
 
 ```bash
 run_server.bat --dev --profile cpp
 ```
 
-or set `BIONIC_PROFILE=cpp` in your MCP client config.
-
-| Field | Meaning |
-|---|---|
-| `version` | Currently `1`. An unrecognised version is an error, so a future format cannot be misread as valid |
-| `enable` | Optional, defaults to `true`. `false` **parks** a profile: it is not emitted to client config, and selecting it is refused as *disabled* rather than *not found* |
-| `description` | Shown by `--list`. Nothing is committed, so this is where the reason for a profile lives |
-| `tools` | A `BIONIC_TOOLS` string, validated at load |
-| `env` | Extra variables. Setting `BIONIC_TOOLS` here is an error (it duplicates `tools`), as is `BIONIC_PROFILE` (circular) |
-
 **`tools` is validated when the file loads.** This is the main reason to prefer
-a profile over the bare variable. `"tools": "core,cpp"` is the natural mistake
-— `cpp` sounds like a group and is not one — and the file reports it by name,
-listing the six real groups. As a plain environment variable the same typo only
-warns at startup and silently registers the default 17 tools.
+a profile over the bare variable. `"tools": "core,cpp"` is the natural mistake —
+`cpp` sounds like a group and is not one — and the file reports it by name,
+listing the real groups. As a plain environment variable the same typo only
+warns at startup and silently registers the default set.
 
-Commands:
+#### Commands
 
 ```bash
-python -m windows_agent_mcp.profiles --init          # scaffold (--force to overwrite)
-python -m windows_agent_mcp.profiles --list          # names, state, tool counts
-python -m windows_agent_mcp.profiles --emit client   # MCP client config, enabled only
-python -m windows_agent_mcp.profiles --emit inspector --profile cpp
+python -m windows_agent_mcp.config --list                    # settings and profiles
+python -m windows_agent_mcp.config --init                    # write it now (--force to overwrite)
+python -m windows_agent_mcp.config --emit client             # MCP client config, enabled profiles only
+python -m windows_agent_mcp.config --emit inspector --profile cpp
 ```
 
-`--emit client` produces exactly what a client needs, with `research` omitted
-because it is disabled:
+`--emit client` produces exactly what a client needs:
 
 ```json
 {
@@ -803,69 +814,46 @@ because it is disabled:
     "cpp": {
       "command": "C:/path/to/mcp-server/.venv/Scripts/windows-agent-mcp.exe",
       "env": {
-        "BIONIC_TOOLS": "edit,build,docs",
-        "BIONIC_PROJECT_ROOTS": "C:/path/to/your/project"
+        "WAMCP_TOOLS": "edit,build,docs",
+        "WAMCP_PROJECT_ROOTS": "C:/path/to/your/project"
       }
     }
   }
 }
 ```
 
-Note the **absolute** command path. A bare `"windows-agent-mcp"` looks right
-but fails in a real client: the console script lives in `.venv\Scripts` and is
-not on a global PATH, so Claude Desktop cannot launch it.
+Note the **absolute** command path. A bare `"windows-agent-mcp"` looks right but
+fails in a real client: the console script lives in `.venv\Scripts` and is not
+on a global PATH.
 
-**Precedence is "more local wins".** An explicit `BIONIC_TOOLS` beats a
-profile's `tools`, and an already-set variable beats a profile's `env` entry —
-so a profile named in a client config can be overridden for one run without
-editing the file. The override is logged, because a silently ignored profile is
-exactly the confusion profiles exist to remove.
+#### When something is wrong with it
 
-A missing file, malformed JSON, an unknown name or a disabled name all leave
-the server running with the default tool set, reporting the reason through
-`get_server_info` (`profile`, `profile_error`, `profiles_file`) and on stderr.
-Aborting startup would surface in an MCP client as an opaque connection
-failure. The `--*` commands above, being interactive, do exit non-zero instead.
+A missing file is generated. A malformed one, an unknown setting, an unknown or
+disabled profile name — all of them leave the server running on defaults and
+report the reason through `get_server_info` (`config_file`, `config_error`,
+`active_profile`) and on stderr. Aborting startup would surface in an MCP
+client as an opaque connection failure, which is far harder to diagnose. The
+`--*` commands above, being interactive, do exit non-zero instead.
 
-The file is found via `BIONIC_PROFILES_FILE`, else `mcp-profiles.json` in the
-working directory, else the repository root.
+The file is found via `WAMCP_CONFIG_FILE`, else `input/config.json` under the
+working directory, else under the repository root.
 
-> **Setting groups under `--dev`.** Pass `--tools` to the launcher rather than
-> exporting `BIONIC_TOOLS` yourself. The MCP Inspector spawns the server with a
-> fixed environment allowlist (`PATH`, `TEMP`, `APPDATA` and a few more) rather
-> than inheriting yours, so an exported variable never reaches it. The launcher
-> works around this by generating an Inspector config with an explicit `env`
-> block; `--tools`, `--web` and `BIONIC_PROJECT_ROOTS` are all forwarded that
-> way. Set variables before invoking the launcher and it will pass them on.
+> **Setting things under `--dev`.** Pass `--tools` or `--profile` to the
+> launcher rather than exporting variables yourself. The MCP Inspector spawns
+> the server with a fixed environment allowlist rather than inheriting yours, so
+> an exported variable never reaches it. The launcher works around this by
+> generating an Inspector config with an explicit `env` block.
 
 #### Per-profile toggles in one client
 
-Point several client entries at the same binary with different profiles. You
-get a per-profile on/off switch in the client UI, with one codebase and one
-security policy behind it:
+Point several client entries at the same binary with different profiles. You get
+a per-profile on/off switch in the client UI, with one codebase and one security
+policy behind it — `--emit client` writes this for you.
 
-```json
-{
-  "mcpServers": {
-    "cpp": {
-      "command": "windows-agent-mcp",
-      "env": {
-        "BIONIC_TOOLS": "edit,build,docs",
-        "BIONIC_PROJECT_ROOTS": "C:/path/to/your/project"
-      }
-    },
-    "research": {
-      "command": "windows-agent-mcp",
-      "env": { "BIONIC_TOOLS": "core,research" }
-    }
-  }
-}
-```
-
-One caveat if you enable two profiles at once: both include `core`, so
-`read_file` and friends appear twice. Clients handle duplicate tool names
-inconsistently — some prefix by server, some silently drop one. Either give
-`core`-only tools to a single profile or check your client's behaviour first.
+One caveat if you enable two at once: both include `core`, so `read_file` and
+friends appear twice. Clients handle duplicate tool names inconsistently — some
+prefix by server, some silently drop one. Either give `core`-only tools to a
+single profile or check your client's behaviour first.
 
 ### Context economy
 
@@ -962,12 +950,12 @@ and told not to guess another path on the same host.
 prompt — *"The assistant wants to read a web page from `www.redblobgames.com`"*
 — and answering yes lets the call continue immediately. Clients that do not
 implement it fall back to the message above, so nothing depends on it. Set
-`BIONIC_HOST_CONSENT=0` if you would rather never be prompted.
+`WAMCP_HOST_CONSENT=0` if you would rather never be prompted.
 
 An approval from a prompt lasts **until the server restarts**, and is not
 written to disk. That is because the MCP specification permits a client to
 answer an elicitation itself rather than putting it to a person, so an
-"approval" is not proof you saw it. Set `BIONIC_HOST_GRANT_PERSIST=1` — once
+"approval" is not proof you saw it. Set `WAMCP_HOST_GRANT_PERSIST=1` — once
 you know your client really does ask you — and the prompt gains an *always*
 option that records the host in the file.
 
@@ -979,7 +967,7 @@ option that records the host in the file.
 | **One exact host** | No wildcards. `*.example.com` reads like a narrow grant and is really an any-host grant for that domain: one stale subdomain CNAME, or any host that lets strangers publish under a subdomain, and it is research mode with extra steps |
 | **Not per-URL** | A grant covers the whole host. Per-URL sounds tighter and breaks on the first paginated documentation page |
 | **Persistent trust** | An approved host can be fetched with an *arbitrary path*, so if it is attacker-controlled the exfiltration channel is open for that host. "I trust this site" is the decision, not "just this once" |
-| **Not writable by the model** | `write_file` and `edit_file` refuse any file named `mcp-allowed-hosts.json` or `mcp-profiles.json`, anywhere on disk, with error type `PROTECTED_PATH` |
+| **Not writable by the model** | `write_file` and `edit_file` refuse any file named `mcp-allowed-hosts.json`, and any path ending `input/config.json`, anywhere on disk, with error type `PROTECTED_PATH` |
 
 That last row matters more than it looks. The grants file is searched for in
 the current directory *first*, so a model able to **create** one where none
@@ -1048,14 +1036,14 @@ rejects non-browser agents; see *[Search backend](#search-backend)*.
 
 ## Web research
 
-Off by default. Set `BIONIC_WEB_RESEARCH=1` and restart the server to register
+Off by default. Set `WAMCP_WEB_RESEARCH=1` and restart the server to register
 `web_search` and widen `fetch_web_page` from the documentation hosts to any
 public host.
 
 > **You probably want `search` plus a host grant instead.** The [`search` group](#search-vs-research) registers `web_search` *without* widening which hosts may be read, and [granting one host](#granting-one-host) opens exactly the site you need, read-only, with no restart. Enable research mode when approving hosts one at a time is genuinely impractical.
 
 ```bash
-$env:BIONIC_WEB_RESEARCH="1"; windows-agent-mcp
+$env:WAMCP_WEB_RESEARCH="1"; windows-agent-mcp
 ```
 
 The variable is read once at startup, so changing it needs a restart. When it
@@ -1111,7 +1099,7 @@ DuckDuckGo's `lite` endpoint, no API key. Two consequences worth knowing:
   than silently reporting no results. Requests are rate limited to one every
   two seconds.
 
-`BIONIC_SEARCH_BACKEND` selects the provider. Only `duckduckgo` exists today;
+`WAMCP_SEARCH_BACKEND` selects the provider. Only `duckduckgo` exists today;
 `search_backends.py` defines a `SearchBackend` Protocol so a keyed API can be
 added without touching the tools.
 
@@ -1135,6 +1123,182 @@ All tools return structured errors when operations fail:
 }
 ```
 
+## Design notes
+
+Decisions that look like over-engineering, or like mistakes, until you know
+what produced them. Each entry names the failure behind it, because "why is
+this here" is otherwise unanswerable — and an unanswerable check is one that
+eventually gets removed.
+
+### Security
+
+**The trust files are refused by name or path suffix, not by exact path.**
+`write_file` and `edit_file` reject anything named `mcp-allowed-hosts.json`, or
+any path ending `input/config.json`, anywhere on disk. That is broader than
+"the file we are reading" on purpose: both are searched for in the *current
+directory first*, so the dangerous move is a model **creating** one where none
+existed — and a path-equality check cannot see a file that does not exist yet.
+
+The config file uses a two-component suffix rather than its bare name because
+`config.json` alone is far too common: refusing every one would break ordinary
+work in any project that has one.
+
+**The granted-hosts file is never cached.** The obvious cache key —
+`(path, st_mtime_ns, st_size)` — is unsound: NTFS mtime resolution is about a
+millisecond, so two writes of equal length inside one tick are
+indistinguishable and the stale host set wins. For this file that means a
+revoked host still reading as granted. A correct key would have to read the
+file anyway, and that read is free next to the DNS lookup and TLS handshake of
+the fetch it serves.
+
+**`DocRedirectHandler.allowed_extra_hosts()` is a classmethod, not an
+attribute.** The urllib openers are built once at import. A value captured then
+would make a granted host readable at its canonical URL and refused the instant
+it redirected — which is most documentation sites.
+
+**The refusal path must not resolve DNS.** The host allowlist is checked
+*before* resolving, so a refused host is never looked up. Adding a lookup to
+decide whether to offer a grant would leak the attempt to that host's
+nameserver before anyone consented, and would let an injected URL trigger a
+probe.
+
+**A refused redirect is a policy refusal, not a network failure.** It reports
+`URL_NOT_ALLOWED` naming the redirect **target**, not the requested URL —
+those are different hosts, and the requested one is usually already granted.
+The common case is `www.example.com` redirecting to `example.com`: different
+hostnames, so granting one does not grant the other. `ALLOWED_DOC_HOSTS` lists
+both spellings of `khronos.org` for exactly this reason.
+
+**Every `DANGEROUS_PATTERNS` entry needs a word boundary on *both* sides.**
+Omitting the leading one made the `rm` rule reject `confirm`, `platform` and
+`term`.
+
+**Base64 detection preserves case and strips NUL bytes before matching.**
+PowerShell's `-EncodedCommand` payload is UTF-16-LE. Lowercasing the command,
+or splitting tokens on `=`, breaks detection entirely.
+
+**The one-command-per-call check is quote-aware.** A blanket textual search for
+`;` would reject `git commit -m "fix; cleanup"`. The exception is `$(`, which
+is rejected inside double quotes too, because PowerShell interpolates there.
+
+### Writing files
+
+**Writes are confined; reads are not.** A bad read costs context, a bad write
+costs work. Do not "fix" the asymmetry in either direction.
+
+**Paths resolve before the containment check**, so `..` and a symlinked parent
+are followed *before* the root test rather than at `open()` time. Reordering
+these reintroduces a traversal escape.
+
+**Never let Python translate newlines.** Content is written as bytes: on
+Windows, text mode silently turns every `\n` into `\r\n`. `edit_file`
+detects the file's dominant ending, matches in LF space so a caller's `\n`
+string finds a CRLF file, and restores the original ending. Without that, the
+most common possible failure is an edit that cannot match for reasons invisible
+in the output — and the model then rewrites the whole file to work around it.
+
+**Ambiguity is refused, not guessed.** A non-unique `old_string` is an error
+naming the count, not a first-match replacement. A no-op edit is also an error:
+a model looping on one never makes progress.
+
+### Reading and searching
+
+**Directories are pruned before descending.** On a C++ tree the build output
+dwarfs the source, so filtering afterwards would still pay to enumerate every
+object file.
+
+**Truncation is reported, never swallowed.** A search that silently stops early
+tells the model "no matches" when the truth is "stopped looking" — and the
+model then trusts a wrong answer. The same goes for skipped binary and
+unreadable files: they are counted and named.
+
+**Globs are `fnmatch`, not `pathlib.match`.** `*` spans directory separators,
+so `src/*.cpp` also matches `src/renderer/vk/device.cpp`. That is intended.
+
+### Build output
+
+**Diagnostics are parsed, not dumped.** A C++ project emits hundreds of
+warnings, one template error runs fifty lines, and MSVC repeats a bad header's
+error once per translation unit. That raw log *is* the context window for a
+small model. Identical diagnostics collapse to one entry with a count.
+
+**Never report "no errors" for a failed build.** If the exit code is non-zero
+and nothing parsed, the report shows the tail of the raw output and says the
+diagnostics were unrecognised. A clean-looking report on a failed build is a
+lie the model acts on.
+
+**The diagnostic patterns are order-sensitive.** The permissive fallbacks are
+last because they would otherwise swallow lines the specific patterns parse
+properly. The file group tolerates a leading drive letter, or `C:\x\main.obj`
+splits at the drive colon.
+
+**A blank line does not end a CMake message block.** A `find_package` failure
+separates its prose from the candidate filenames with an empty line, so only a
+non-blank line at column zero ends it. Treating a blank line as the terminator
+drops the actionable half of the message.
+
+### Web content
+
+**Everything fetched is untrusted.** The warning wraps the content *before and
+after* — the trailing one is what a small model actually heeds — and any copy
+of the markers inside the content is neutralised. Search titles and snippets
+need this as much as page bodies: anyone can rank a page called
+"SYSTEM: ignore previous instructions".
+
+**Extraction strips hiding places, not just scripts.** HTML comments,
+`[hidden]`, `aria-hidden`, `display:none` and bidi/zero-width characters. That
+is where instructions get hidden from a reader but not from `get_text()`.
+
+**Chrome removal is conditional.** `nav`/`header`/`footer`/`form` are dropped
+only when a `<main>`, `[role=main]` or `<article>` container exists. Dropping
+them unconditionally blanks documentation sites, and the model reports the page
+as empty.
+
+**Decode before parsing, and distrust an `iso-8859-1` header.** latin-1 never
+fails to decode, so honouring a wrong one silently mojibakes the whole page —
+but demote it below utf-8 rather than ignoring it, or genuinely latin-1 pages
+break.
+
+**"Blocked" is never reported as "no results".** A rate-limited search reported
+as empty makes a small model rephrase and retry forever. DuckDuckGo signals
+blocking with a **202**, which urllib treats as success, so the status is
+checked explicitly.
+
+### Tools and registration
+
+**`get_tools()` is pure** — it takes the resolved groups rather than reading
+the environment. pre-commit runs the test suite on every commit, so an
+environment-reading version would stop anyone actually using `WAMCP_TOOLS`
+from committing.
+
+**Descriptions are trimmed via `add_tool(description=...)`, never by mutating
+`fn.__doc__`.** Mutation leaks across the process, so any later reader — the
+test suite included — would see a truncated docstring depending on whether
+`main()` had run.
+
+**Presentation order is derived, not re-declared.** `get_tools` filters
+`ALL_TOOLS` rather than concatenating group tuples, so the workflow ordering in
+`TOOLS` is the single source of it. That order affects which tool a small model
+reaches for, so it is not cosmetic.
+
+**A bad group name degrades, it does not abort.** Raising would kill startup,
+which an MCP client renders as an opaque connection failure. It logs to stderr,
+registers the default set, and surfaces the message in `get_server_info`.
+
+**`search` and `research` are two permissions.** One answers "may run
+`web_search`", the other "may `fetch_web_page` read any host". Conflating them
+is what made "find URLs but still gate reading" inexpressible — and it is why a
+model with a page reader and no search invents URLs from memory.
+
+### Testing
+
+**The suite must never touch the network**, and must never write into the
+repository. `socket.getaddrinfo` is stubbed and openers are injected.
+
+**A test must never fail on a fresh, un-bootstrapped checkout.** Anything
+needing `.venv` skips on its absence: a clone is the first place a new user runs
+the suite, and a red suite there reads as a broken project.
+
 ## Development
 
 ```bash
@@ -1148,11 +1312,20 @@ python bootstrap.py                                       # .venv + everything
 The suite is hermetic: it makes no network calls and writes nothing into the
 repository.
 
-**[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) covers the rest** — code style, how to add
-a tool and register it, how to write tests that stay hermetic, and the security
-review checklist. **[CLAUDE.md](CLAUDE.md)** records the design rules and the
-reasoning behind the non-obvious ones; read it before changing the security
-model, the tool groups or the web-access layers.
+The suite says nothing about whether a given model *uses* the tools well —
+which is the thing that decides whether this server is useful. That needs
+prompts run against a real model, graded on which tool it reached for and
+whether it stopped when refused.
+
+**[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) covers the rest** — code style,
+how to add a tool and register it, how to write tests that stay hermetic, and
+the security review checklist.
+
+**[Design notes](#design-notes) above** covers the decisions that look like
+over-engineering until you know what produced them — read it before simplifying
+anything in the security model, the file writers or the web-access layers. The
+same reasoning also sits in comments beside the code it explains, so a check
+that looks redundant will say why it is there.
 
 For the module layout, read `src/windows_agent_mcp/` — one module per tool under
 `tools/`, shared helpers alongside. A hand-written file tree used to live here

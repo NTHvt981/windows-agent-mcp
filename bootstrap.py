@@ -311,7 +311,7 @@ def main(argv: list[str] | None = None) -> int:
     print()
     print("    1. Point it at your project, or writes and builds stay")
     print("       confined to the download sandbox:")
-    print("         set BIONIC_PROJECT_ROOTS=C:\\path\\to\\your\\project")
+    print("         set WAMCP_PROJECT_ROOTS=C:\\path\\to\\your\\project")
     print()
     print("    2. Start it:")
     print("         run_server.bat --dev      with the MCP Inspector UI")

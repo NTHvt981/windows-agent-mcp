@@ -38,9 +38,10 @@ from pathlib import Path
 #
 # This is defense-in-depth only.
 #
-# The real Bionic shell is still available to the agent.
-# Therefore, this MCP PowerShell tool should be considered
-# a convenience tool, not a hardened security boundary.
+# This bounds WHICH PROGRAM starts, not what it then does: `python build.py`
+# runs whatever that file contains, and `npx`/`pip` fetch and execute
+# third-party packages. Treat it as a convenience tool that keeps the obvious
+# mistakes out, not as a hardened security boundary.
 
 ALLOWED_COMMANDS: set[str] = {
     # Development tools

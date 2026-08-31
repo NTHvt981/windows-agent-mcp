@@ -575,7 +575,7 @@ def test_output_outside_a_writable_root_is_refused(
         "WRITE_PATH_NOT_ALLOWED",
     )
 
-    assert "BIONIC_PROJECT_ROOTS" in " ".join(payload["error"]["recovery"])
+    assert "WAMCP_PROJECT_ROOTS" in " ".join(payload["error"]["recovery"])
 
 
 def test_shader_timeout_is_reported(writable_project, shader_runner) -> None:

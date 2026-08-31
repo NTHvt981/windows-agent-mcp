@@ -1,6 +1,6 @@
 """Tests for write_file and edit_file.
 
-The security property under test is confinement: with BIONIC_PROJECT_ROOTS
+The security property under test is confinement: with WAMCP_PROJECT_ROOTS
 unset, the only writable place is the download sandbox, so a default install
 cannot modify source anywhere. The correctness property is line endings --
 this is a Windows-targeted server and silently converting a CRLF file to LF
@@ -30,7 +30,7 @@ def test_write_refuses_outside_every_root(tmp_path, isolated_download_root) -> N
         "WRITE_PATH_NOT_ALLOWED",
     )
 
-    assert "BIONIC_PROJECT_ROOTS" in " ".join(payload["error"]["recovery"])
+    assert "WAMCP_PROJECT_ROOTS" in " ".join(payload["error"]["recovery"])
     assert not target.exists()
 
 

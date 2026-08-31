@@ -155,7 +155,7 @@ async def fetch_web_page(
     * By default, reference documentation (registry.khronos.org,
       docs.vulkan.org, learn.microsoft.com, en.cppreference.com, cmake.org and
       a few more) plus any host the operator has granted.
-    * With research mode on (BIONIC_WEB_RESEARCH=1), any public HTTPS host.
+    * With research mode on (WAMCP_WEB_RESEARCH=1), any public HTTPS host.
 
     If a host is not readable, the operator can grant that one host without
     restarting the server, and on some clients you will be asked directly. A
@@ -364,7 +364,7 @@ def _refused(
         )
         recovery.append(
             "Tell the user which host you need and why, then stop. Do not "
-            "suggest BIONIC_WEB_RESEARCH=1 as the first option: that opens "
+            "suggest WAMCP_WEB_RESEARCH=1 as the first option: that opens "
             "every host at once."
         )
         recovery.append(

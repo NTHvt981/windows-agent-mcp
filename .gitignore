@@ -12,27 +12,41 @@ wheels/
 *.egg
 .eggs/
 
-# Virtual environments
+# Virtual environments. Absolute paths are baked into the scripts, so a .venv
+# is worthless anywhere but the machine that made it. bootstrap.py recreates it.
 .venv/
 venv/
 env/
 ENV/
 
-# IDE
+# IDE. .vscode/settings.json IS tracked: it is workspace-relative and useful.
 .idea/
-.vscode/settings.json
 *.swp
 *.swo
 *~
 
-# Local tool-group profiles: holds machine-specific project paths, so it is
-# scaffolded per machine with `python -m windows_agent_mcp.profiles --init`
-# rather than committed.
-mcp-profiles.json
+# The server's own settings. Generated on first run and holding paths to your
+# projects, so it is per-machine rather than committed. Delete it and the next
+# run writes a fresh one listing every setting with its default.
+input/
 
 # Locally granted web hosts: a per-machine trust decision, not a project
 # setting. Managed with `python -m windows_agent_mcp.hostgrants --add HOST`.
 mcp-allowed-hosts.json
+
+# Working notes and design rationale kept alongside the code but not published.
+#
+# Anything ending in _claude.md is local context: development narrative, design
+# rules for an AI assistant working on this repository, session history. The
+# code and its comments have to stand on their own without these, so nothing
+# tracked may link to one.
+*_claude.md
+
+# Design rules for an AI assistant working on this repository. Named
+# explicitly because the glob above does not match it -- there is no
+# underscore -- and the reasoning it holds belongs in README.md and in
+# comments next to the code it explains, where everyone can read it.
+CLAUDE.md
 
 # Testing / coverage
 .pytest_cache/

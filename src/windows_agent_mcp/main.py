@@ -35,12 +35,13 @@ from .utils import (
     ALWAYS_ON_TOOL_GROUPS,
     DEFAULT_TOOL_GROUPS,
     PROFILE_ENV_VAR,
+    TOOL_GROUPS_ENV_VAR,
     active_tool_groups,
 )
 
 __all__: list[str] = [
     "ALL_TOOLS",
-    "apply_selected_profile",
+    "apply_configuration",
     "TOOL_GROUPS",
     "TOOLS",
     "WEB_TOOLS",
@@ -167,7 +168,7 @@ def get_tools(
     Pure by design: takes the resolved groups as an argument rather than
     reading the environment. That matters because pre-commit runs the test
     suite on every commit -- if this read os.environ directly, anyone with
-    BIONIC_TOOLS or BIONIC_WEB_RESEARCH exported (that is, anyone actually
+    WAMCP_TOOLS or WAMCP_WEB_RESEARCH exported (that is, anyone actually
     using the feature) would see a different tool count and be unable to
     commit.
 
@@ -248,54 +249,93 @@ def tool_description(tool: Callable[..., Any]) -> str:
     return trimmed or doc.strip()
 
 
-def apply_selected_profile() -> str | None:
-    """Resolve BIONIC_PROFILE and populate BIONIC_TOOLS from it.
+def apply_configuration() -> tuple[list[str], list[str]]:
+    """Load input/config.json and populate the environment from it.
 
-    Done here, before anything reads the group set, rather than inside
-    active_tool_groups(): profiles.py needs VALID_TOOL_GROUPS from utils, so
+    Done here, before anything reads a setting, rather than inside
+    `active_tool_groups()`: config.py needs `parse_tool_groups` from utils, so
     utils cannot import it. Resolving at startup and writing the result into the
     environment means every existing path -- active_tool_groups,
-    web_research_enabled, every tool -- keeps working with no new coupling.
+    web_research_enabled, get_download_root, every tool -- keeps working with no
+    new coupling.
+
+    Generates the file when it is absent. That is the point of it: a fresh
+    install gets a complete, documented table of every setting rather than
+    having to discover the variable names from documentation.
 
     Returns:
-        An error or override message worth logging, else None.
+        (notes, problems). Notes are news -- "a config file was generated" --
+        and belong at info. Problems are conflicts and errors, and belong at
+        warning. Keeping them apart matters: a warning on the ordinary path is
+        how an operator learns to ignore warnings.
     """
 
-    requested = os.environ.get(PROFILE_ENV_VAR, "").strip()
-
-    if not requested:
-        return None
-
-    # Imported lazily: profiles imports get_tools from this module for its
+    # Imported lazily: config imports get_tools from this module for its
     # --list output, so a module-scope import here would be a cycle.
-    from .profiles import (
-        apply_profile_to_environment,
-        find_profiles_file,
-        load_profiles,
+    from .config import (
+        apply_to_environment,
+        find_config_file,
+        load_config,
         resolve_profile,
+        write_scaffold,
     )
 
-    path = find_profiles_file()
+    notes: list[str] = []
+    problems: list[str] = []
 
-    profiles, errors = load_profiles(path)
+    path = find_config_file()
 
-    if errors:
-        return f"{PROFILE_ENV_VAR}={requested}: {errors[0]}"
+    if not path.is_file():
+        error = write_scaffold(path)
 
-    profile, error = resolve_profile(requested, profiles)
+        if error is not None:
+            # Not fatal: the server runs on defaults perfectly well, so a
+            # read-only checkout must not be a startup failure.
+            problems.append(f"could not generate a config file: {error}")
+        else:
+            notes.append(f"generated {path} -- it lists every setting with its default")
 
-    if profile is None:
-        return f"{PROFILE_ENV_VAR}: {error}"
+    config, errors = load_config(path)
 
-    skipped = apply_profile_to_environment(profile)
+    problems.extend(f"{path.name}: {error}" for error in errors)
+
+    skipped = apply_to_environment(config.settings)
 
     if skipped:
-        return (
-            f"profile '{requested}' applied, but "
-            f"{', '.join(skipped)} was already set and takes precedence"
+        # A conflict, not noise: this only fires when the operator has set a
+        # value in the file AND in the environment. A silently ignored setting
+        # is the confusion the file exists to remove.
+        problems.append(
+            f"{', '.join(sorted(skipped))} set in the environment, "
+            f"which overrides {path.name}"
         )
 
-    return None
+    # An explicitly requested profile beats the file's own choice, same rule.
+    requested = os.environ.get(PROFILE_ENV_VAR, "").strip() or config.active_profile
+
+    if not requested:
+        return notes, problems
+
+    profile, error = resolve_profile(requested, config.profiles)
+
+    if profile is None:
+        problems.append(f"profile: {error}")
+        return notes, problems
+
+    notes.append(f"profile: {requested}")
+
+    profile_skipped = apply_to_environment(
+        {TOOL_GROUPS_ENV_VAR: profile.tools, **profile.settings}
+    )
+
+    if profile_skipped:
+        problems.append(
+            f"profile '{requested}' applied, but "
+            f"{', '.join(sorted(profile_skipped))} was already set and takes "
+            f"precedence"
+        )
+
+    return notes, problems
 
 
 def posture_warnings(groups: frozenset[str]) -> list[str]:
@@ -341,13 +381,16 @@ def posture_warnings(groups: frozenset[str]) -> list[str]:
 def main() -> None:
     """Register the configured tools and run the MCP server over stdio."""
 
-    profile_message = apply_selected_profile()
+    # A bad config degrades to defaults rather than killing startup: an MCP
+    # client renders a dead server as an opaque connection failure, which is
+    # far harder to diagnose than a warning on stderr.
+    notes, problems = apply_configuration()
 
-    if profile_message is not None:
-        # A bad profile degrades to the default tool set rather than killing
-        # startup, for the same reason an unknown group name does: an MCP client
-        # renders a dead server as an opaque connection failure.
-        log.warning("%s", profile_message)
+    for note in notes:
+        log.info("%s", note)
+
+    for problem in problems:
+        log.warning("%s", problem)
 
     groups, error = active_tool_groups()
 

@@ -14,11 +14,11 @@ from windows_agent_mcp.utils import (  # type: ignore[import-untyped]
 
 
 def test_get_download_root_honours_env_override(tmp_path, monkeypatch):
-    """BIONIC_DOWNLOAD_ROOT should decide the download root, and be created."""
+    """WAMCP_DOWNLOAD_ROOT should decide the download root, and be created."""
 
     target = tmp_path / "custom"
 
-    monkeypatch.setenv("BIONIC_DOWNLOAD_ROOT", str(target))
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(target))
 
     root = get_download_root()
 
@@ -33,7 +33,7 @@ def test_get_download_root_default_is_not_machine_specific(monkeypatch):
     user's profile, which raised PermissionError on every other machine.
     """
 
-    monkeypatch.delenv("BIONIC_DOWNLOAD_ROOT", raising=False)
+    monkeypatch.delenv("WAMCP_DOWNLOAD_ROOT", raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
 
     root = default_download_root()
@@ -46,7 +46,7 @@ def test_get_download_root_default_is_not_machine_specific(monkeypatch):
 def test_get_download_root_exists(tmp_path, monkeypatch):
     """Test that download root always exists after get_download_root() is called."""
 
-    monkeypatch.setenv("BIONIC_DOWNLOAD_ROOT", str(tmp_path / "dl"))
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(tmp_path / "dl"))
 
     root = get_download_root()
 

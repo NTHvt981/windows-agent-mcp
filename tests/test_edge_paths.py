@@ -111,7 +111,7 @@ def test_default_root_falls_back_without_localappdata(
 def test_get_download_root_uses_the_default_when_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("BIONIC_DOWNLOAD_ROOT", raising=False)
+    monkeypatch.delenv("WAMCP_DOWNLOAD_ROOT", raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
 
     root = get_download_root()

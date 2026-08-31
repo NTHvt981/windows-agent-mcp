@@ -55,7 +55,7 @@ def test_main_registers_the_configured_tools_then_runs(
     """
 
     if research:
-        monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+        monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     expected = ALL_TOOLS if research else TOOLS
 
@@ -78,7 +78,7 @@ def test_research_mode_adds_exactly_one_tool(
     documentation hosts instead, so research mode adds one tool, not two.
     """
 
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     server = FakeServer()
 
@@ -94,7 +94,7 @@ def test_main_registers_each_tool_once(
     research: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     if research:
-        monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+        monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     server = FakeServer()
 
@@ -252,7 +252,7 @@ def test_tool_description_keeps_the_steering_prose() -> None:
 
     assert "Preferred over write_file" in tool_description(edit_file)
     assert "must match EXACTLY" in tool_description(edit_file)
-    assert "BIONIC_PROJECT_ROOTS" in tool_description(edit_file)
+    assert "WAMCP_PROJECT_ROOTS" in tool_description(edit_file)
 
     assert "where is X used" in tool_description(search_files)
 
@@ -344,7 +344,7 @@ def test_main_logs_a_posture_warning_and_still_starts(
     do what the operator expects.
     """
 
-    monkeypatch.setenv("BIONIC_TOOLS", "core,search")
+    monkeypatch.setenv("WAMCP_TOOLS", "core,search")
 
     server = FakeServer()
     monkeypatch.setattr(main_module, "mcp", server)

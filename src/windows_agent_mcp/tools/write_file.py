@@ -27,7 +27,7 @@ def write_file(path: str, content: str, overwrite: bool = False) -> str:
     lines is how a small model accidentally deletes the rest of it.
 
     Writes are confined to the download root plus any directory listed in
-    BIONIC_PROJECT_ROOTS. Missing parent directories are created.
+    WAMCP_PROJECT_ROOTS. Missing parent directories are created.
 
     Newlines are written exactly as given, with no CRLF translation, so the
     content lands byte-for-byte as supplied. Encoding is always UTF-8.

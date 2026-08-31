@@ -23,7 +23,6 @@ from conftest import FakeResponse, assert_error_response
 
 from windows_agent_mcp import hostgrants
 from windows_agent_mcp.inspector_config import FORWARDED_ENV_VARS
-from windows_agent_mcp.profiles import DEFAULT_PROFILES_FILENAME
 from windows_agent_mcp.tools.edit_file import edit_file
 from windows_agent_mcp.tools.fetch_web_page import clear_cache, read_web_page
 from windows_agent_mcp.tools.write_file import write_file
@@ -127,7 +126,7 @@ def test_a_wildcard_is_refused_rather_than_narrowed() -> None:
         ("   ", set()),
         ("a.example.com", {"a.example.com"}),
         ("a.example.com,b.example.com", {"a.example.com", "b.example.com"}),
-        # Semicolon matches BIONIC_PROJECT_ROOTS; cmd.exe splits batch
+        # Semicolon matches WAMCP_PROJECT_ROOTS; cmd.exe splits batch
         # arguments on both, so a launcher flag can arrive either way.
         ("a.example.com;b.example.com", {"a.example.com", "b.example.com"}),
         ("a.example.com\nb.example.com", {"a.example.com", "b.example.com"}),
@@ -148,7 +147,7 @@ def test_one_bad_entry_does_not_discard_the_good_ones() -> None:
 
     assert hosts == {"good.example.com"}
     assert len(errors) == 1
-    assert "BIONIC_EXTRA_DOC_HOSTS" in errors[0]
+    assert "WAMCP_EXTRA_DOC_HOSTS" in errors[0]
 
 
 # ============================================================
@@ -358,7 +357,7 @@ def test_the_environment_variable_merges_with_the_file(
 ) -> None:
     write_grants(grants_file, "file.example.com")
 
-    monkeypatch.setenv("BIONIC_EXTRA_DOC_HOSTS", "env.example.com")
+    monkeypatch.setenv("WAMCP_EXTRA_DOC_HOSTS", "env.example.com")
 
     assert hostgrants.granted_hosts()[0] == {
         "file.example.com",
@@ -487,7 +486,7 @@ def test_persist_is_off_unless_the_operator_says_otherwise(
     """
 
     if value is not None:
-        monkeypatch.setenv("BIONIC_HOST_GRANT_PERSIST", value)
+        monkeypatch.setenv("WAMCP_HOST_GRANT_PERSIST", value)
 
     assert hostgrants.persist_enabled() is expected
 
@@ -501,9 +500,7 @@ def test_persist_is_off_unless_the_operator_says_otherwise(
     "filename",
     [
         "mcp-allowed-hosts.json",
-        "mcp-profiles.json",
         "MCP-ALLOWED-HOSTS.JSON",
-        "Mcp-Profiles.Json",
     ],
 )
 def test_write_file_refuses_the_trust_files(
@@ -556,16 +553,14 @@ def test_an_ordinary_json_file_is_still_writable(writable_project: Path) -> None
 
 
 def test_the_protected_names_match_the_modules_that_own_them() -> None:
-    """utils holds the names; profiles and hostgrants hold the formats.
+    """utils holds the name; hostgrants holds the format.
 
-    The constant lives in utils because the write guard cannot import either
-    module (both import utils). That split is only safe while the names agree.
+    The constant lives in utils because the write guard cannot import
+    hostgrants the other way round. That split is only safe while the names
+    agree.
     """
 
-    assert PROTECTED_CONFIG_FILENAMES == {
-        DEFAULT_PROFILES_FILENAME,
-        hostgrants.DEFAULT_GRANTS_FILENAME,
-    }
+    assert PROTECTED_CONFIG_FILENAMES == {hostgrants.DEFAULT_GRANTS_FILENAME}
 
 
 # ============================================================
@@ -612,7 +607,7 @@ def test_host_grant_would_help_is_precise(url: str, expected: str | None) -> Non
 
 
 def test_no_grant_is_needed_in_research_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     assert host_grant_would_help("https://unknown.example.com/") is None
 
@@ -715,7 +710,7 @@ def test_every_setting_the_server_reads_is_forwarded_to_the_inspector() -> None:
     referenced: set[str] = set()
 
     for path in source_root.rglob("*.py"):
-        referenced |= set(re.findall(r'"(BIONIC_[A-Z_]+)"', path.read_text("utf-8")))
+        referenced |= set(re.findall(r'"(WAMCP_[A-Z_]+)"', path.read_text("utf-8")))
 
     missing = sorted(referenced - set(FORWARDED_ENV_VARS))
 
@@ -727,24 +722,26 @@ def test_every_setting_the_server_reads_is_forwarded_to_the_inspector() -> None:
 
 
 def test_a_profile_may_carry_a_host_grant() -> None:
-    """Profiles validate BIONIC_* keys, so the new ones must be recognised."""
+    """The config file validates setting names, so the host ones must be known."""
 
-    from windows_agent_mcp.profiles import parse_profiles
+    from windows_agent_mcp.config import parse_config
 
-    profiles, errors = parse_profiles(
+    config, errors = parse_config(
         {
             "version": 1,
             "profiles": {
                 "docs": {
                     "tools": "core,docs",
-                    "env": {"BIONIC_EXTRA_DOC_HOSTS": "docs.example.com"},
+                    "settings": {"WAMCP_EXTRA_DOC_HOSTS": "docs.example.com"},
                 }
             },
         }
     )
 
     assert errors == []
-    assert profiles["docs"].env["BIONIC_EXTRA_DOC_HOSTS"] == "docs.example.com"
+    assert config.profiles["docs"].settings["WAMCP_EXTRA_DOC_HOSTS"] == (
+        "docs.example.com"
+    )
 
 
 # ============================================================
@@ -755,7 +752,7 @@ def test_a_profile_may_carry_a_host_grant() -> None:
 def test_the_environment_variable_wins(tmp_path, monkeypatch) -> None:
     target = tmp_path / "elsewhere.json"
 
-    monkeypatch.setenv("BIONIC_ALLOWED_HOSTS_FILE", str(target))
+    monkeypatch.setenv("WAMCP_ALLOWED_HOSTS_FILE", str(target))
 
     assert hostgrants.find_grants_file() == target
 
@@ -763,7 +760,7 @@ def test_the_environment_variable_wins(tmp_path, monkeypatch) -> None:
 def test_a_file_in_the_working_directory_is_used(tmp_path, monkeypatch) -> None:
     """The launcher pushd's to the repository root, so this is the normal case."""
 
-    monkeypatch.delenv("BIONIC_ALLOWED_HOSTS_FILE", raising=False)
+    monkeypatch.delenv("WAMCP_ALLOWED_HOSTS_FILE", raising=False)
     monkeypatch.chdir(tmp_path)
 
     local = tmp_path / hostgrants.DEFAULT_GRANTS_FILENAME
@@ -780,7 +777,7 @@ def test_the_repository_root_is_the_fallback(tmp_path, monkeypatch) -> None:
     inside the virtual environment.
     """
 
-    monkeypatch.delenv("BIONIC_ALLOWED_HOSTS_FILE", raising=False)
+    monkeypatch.delenv("WAMCP_ALLOWED_HOSTS_FILE", raising=False)
     monkeypatch.chdir(tmp_path)
 
     found = hostgrants.find_grants_file()
@@ -940,7 +937,7 @@ def test_list_says_so_when_there_is_no_file(tmp_path, capsys) -> None:
 def test_list_shows_hosts_from_the_environment(tmp_path, capsys, monkeypatch) -> None:
     """Otherwise a host granted through a client env block looks unaccounted for."""
 
-    monkeypatch.setenv("BIONIC_EXTRA_DOC_HOSTS", "env.example.com")
+    monkeypatch.setenv("WAMCP_EXTRA_DOC_HOSTS", "env.example.com")
 
     target = tmp_path / hostgrants.DEFAULT_GRANTS_FILENAME
 
@@ -949,11 +946,11 @@ def test_list_shows_hosts_from_the_environment(tmp_path, capsys, monkeypatch) ->
     out = capsys.readouterr().out
 
     assert "env.example.com" in out
-    assert "BIONIC_EXTRA_DOC_HOSTS" in out
+    assert "WAMCP_EXTRA_DOC_HOSTS" in out
 
 
 def test_list_reports_a_bad_environment_entry(tmp_path, capsys, monkeypatch) -> None:
-    monkeypatch.setenv("BIONIC_EXTRA_DOC_HOSTS", "*.example.com")
+    monkeypatch.setenv("WAMCP_EXTRA_DOC_HOSTS", "*.example.com")
 
     target = tmp_path / hostgrants.DEFAULT_GRANTS_FILENAME
     target.write_text('{"version": 1, "hosts": []}', encoding="utf-8")
@@ -1104,7 +1101,7 @@ def test_a_site_packages_install_does_not_invent_a_repository_path(
     the virtual environment, where nobody would think to put one.
     """
 
-    monkeypatch.delenv("BIONIC_ALLOWED_HOSTS_FILE", raising=False)
+    monkeypatch.delenv("WAMCP_ALLOWED_HOSTS_FILE", raising=False)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "is_file", lambda self: False)
 
@@ -1226,7 +1223,7 @@ def test_a_refused_redirect_does_not_advertise_grants_in_research_mode(
     the operator to grant the host would be advice that cannot work.
     """
 
-    monkeypatch.setenv("BIONIC_WEB_RESEARCH", "1")
+    monkeypatch.setenv("WAMCP_WEB_RESEARCH", "1")
 
     clear_cache()
 

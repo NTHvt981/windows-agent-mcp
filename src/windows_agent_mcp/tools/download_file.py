@@ -177,7 +177,7 @@ def download_file(
 ) -> str:
     """Download a file from an approved HTTPS domain.
 
-    Files are ALWAYS written inside the download root (BIONIC_DOWNLOAD_ROOT,
+    Files are ALWAYS written inside the download root (WAMCP_DOWNLOAD_ROOT,
     or %LOCALAPPDATA%\\windows-agent-mcp\\downloads by default). The caller
     cannot choose an arbitrary filesystem destination, and an existing file is
     never overwritten.
@@ -253,7 +253,7 @@ def download_file(
         request = urllib.request.Request(
             url,
             headers={
-                "User-Agent": "Bionic-Windows-Agent-MCP/1.0",
+                "User-Agent": "windows-agent-mcp/1.0",
             },
             method="GET",
         )

@@ -159,7 +159,7 @@ SKIPPED_DIRECTORY_NAMES: frozenset[str] = frozenset(
 # separate codebases that must not drift on security policy. Separate
 # processes also do not break the exfiltration chain, because the model holds
 # both tool lists in one context and can relay data between them itself.
-TOOL_GROUPS_ENV_VAR: str = "BIONIC_TOOLS"
+TOOL_GROUPS_ENV_VAR: str = "WAMCP_TOOLS"
 
 # Selects a named profile from mcp-profiles.json, which is a friendlier way to
 # say the same thing as TOOL_GROUPS_ENV_VAR.
@@ -169,7 +169,7 @@ TOOL_GROUPS_ENV_VAR: str = "BIONIC_TOOLS"
 # module, so importing it here would be a cycle. main() resolves the profile
 # first and populates TOOL_GROUPS_ENV_VAR from it, after which every path below
 # works unchanged. See profiles.apply_profile_to_environment.
-PROFILE_ENV_VAR: str = "BIONIC_PROFILE"
+PROFILE_ENV_VAR: str = "WAMCP_PROFILE"
 
 # Group NAMES live here; the name -> tools mapping lives in main.TOOL_GROUPS,
 # because that needs the tool imports and is a registration concern. utils
@@ -249,20 +249,20 @@ _ALL_GROUPS_KEYWORD = "all"
 #
 # NOTE, and this is a deliberate operator-chosen tradeoff rather than an
 # oversight: because `research` is an ordinary tool group, listing it in
-# BIONIC_TOOLS widens the network posture on its own. A context-economy
+# WAMCP_TOOLS widens the network posture on its own. A context-economy
 # setting therefore also changes a security setting. That is one variable to
 # reason about instead of two, which is what was asked for -- but it must be
-# stated plainly wherever BIONIC_TOOLS is documented.
-WEB_RESEARCH_ENV_VAR: str = "BIONIC_WEB_RESEARCH"
+# stated plainly wherever WAMCP_TOOLS is documented.
+WEB_RESEARCH_ENV_VAR: str = "WAMCP_WEB_RESEARCH"
 
 # Selects the search backend. See search_backends.get_backend().
-SEARCH_BACKEND_ENV_VAR: str = "BIONIC_SEARCH_BACKEND"
+SEARCH_BACKEND_ENV_VAR: str = "WAMCP_SEARCH_BACKEND"
 
 _TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
 def parse_tool_groups(value: str | None) -> tuple[frozenset[str], str | None]:
-    """Parse a BIONIC_TOOLS value into a set of group names.
+    """Parse a WAMCP_TOOLS value into a set of group names.
 
     Pure: takes the raw string rather than reading the environment, so the test
     suite can cover the whole table without touching os.environ.
@@ -316,7 +316,7 @@ def parse_tool_groups(value: str | None) -> tuple[frozenset[str], str | None]:
 def active_tool_groups() -> tuple[frozenset[str], str | None]:
     """Resolve the groups to register from the environment.
 
-    BIONIC_WEB_RESEARCH is honoured as an alias that implicitly adds the
+    WAMCP_WEB_RESEARCH is honoured as an alias that implicitly adds the
     `research` group. That keeps every existing setup working -- the launcher's
     --web flag, .env.example, and any MCP client config written before groups
     existed -- and it avoids the confusing half-state where the network posture
@@ -357,7 +357,7 @@ def web_research_enabled() -> bool:
     """Return True when research mode is on, by either mechanism.
 
     Routed through the group set rather than reading WEB_RESEARCH_ENV_VAR
-    directly, so `BIONIC_TOOLS=...,research` and `BIONIC_WEB_RESEARCH=1` mean
+    directly, so `WAMCP_TOOLS=...,research` and `WAMCP_WEB_RESEARCH=1` mean
     the same thing to fetch_web_page and web_search without either tool
     knowing how the group set was assembled.
 
@@ -413,7 +413,7 @@ def default_download_root() -> Path:
 def get_download_root() -> Path:
     """Return the configured download directory, creating it if needed.
 
-    Optional environment variable: BIONIC_DOWNLOAD_ROOT
+    Optional environment variable: WAMCP_DOWNLOAD_ROOT
 
     If absent, falls back to default_download_root(), which resolves to
     %LOCALAPPDATA%\\windows-agent-mcp\\downloads on Windows.
@@ -422,11 +422,11 @@ def get_download_root() -> Path:
         Path to the download root directory, ensuring it exists.
 
     Raises:
-        OSError: If the directory cannot be created (e.g. BIONIC_DOWNLOAD_ROOT
+        OSError: If the directory cannot be created (e.g. WAMCP_DOWNLOAD_ROOT
                  points somewhere unwritable).
     """
 
-    configured = os.environ.get("BIONIC_DOWNLOAD_ROOT")
+    configured = os.environ.get("WAMCP_DOWNLOAD_ROOT")
 
     if configured:
         root = Path(configured)
@@ -452,19 +452,17 @@ def get_download_root() -> Path:
 # Callers may now pass a working_directory, but only inside a root the
 # OPERATOR has approved. Configure with a path-separator-delimited list:
 #
-#   BIONIC_PROJECT_ROOTS=C:/work/game;C:/dev/engine
+#   WAMCP_PROJECT_ROOTS=C:/work/game;C:/dev/engine
 #
 # When unset, the download root remains the only permitted location, so the
 # default behaviour is unchanged and widening it is opt-in.
-PROJECT_ROOTS_ENV_VAR: str = "BIONIC_PROJECT_ROOTS"
+PROJECT_ROOTS_ENV_VAR: str = "WAMCP_PROJECT_ROOTS"
 
 # Filename of the tool-group profiles file.
 #
 # Defined here rather than in profiles.py, which is the module that owns the
 # format, purely because of import direction: profiles imports this module, so
 # the write guard below cannot import the constant from there.
-PROFILES_FILENAME: str = "mcp-profiles.json"
-
 # Files the model may never write, by NAME, anywhere on disk.
 #
 # These two files are configuration the server trusts: the grants file says
@@ -484,10 +482,21 @@ PROFILES_FILENAME: str = "mcp-profiles.json"
 # their own config does not go through this function.
 PROTECTED_CONFIG_FILENAMES: frozenset[str] = frozenset(
     {
-        PROFILES_FILENAME,
         DEFAULT_GRANTS_FILENAME,
     }
 )
+
+# The server's settings file, matched on its last two path components rather
+# than its bare name.
+#
+# It decides the writable roots and the registered tools, so a model that could
+# write it would be granting itself permissions. But `config.json` alone is far
+# too common a filename to refuse everywhere -- that would break ordinary work
+# in any project that happens to have one. The two-component suffix is specific
+# enough to leave those alone and still catches the dangerous case, which is
+# CREATING the file in a directory that gets searched, where no path-equality
+# check could see it.
+PROTECTED_PATH_SUFFIX: tuple[str, ...] = ("input", "config.json")
 
 
 class ProtectedPathError(ValueError):
@@ -496,7 +505,7 @@ class ProtectedPathError(ValueError):
     A ValueError subclass so existing `except ValueError` handlers keep
     working, but a distinct type so the writing tools can say something
     different. The generic refusal tells the model to ask for the directory to
-    be added to BIONIC_PROJECT_ROOTS, which for this case is advice that cannot
+    be added to WAMCP_PROJECT_ROOTS, which for this case is advice that cannot
     possibly work -- and sends the user off to change a setting for no reason.
     """
 
@@ -505,7 +514,7 @@ def get_allowed_working_directories() -> list[Path]:
     """Return the roots that run_powershell may execute inside.
 
     Always includes the download root. Additional roots come from
-    BIONIC_PROJECT_ROOTS, separated by os.pathsep (";" on Windows).
+    WAMCP_PROJECT_ROOTS, separated by os.pathsep (";" on Windows).
 
     Non-existent configured roots are skipped rather than raising, so one
     stale entry cannot disable the tool entirely.
@@ -592,7 +601,7 @@ def resolve_write_path(requested: str) -> Path:
 
     Writing reuses the same consent mechanism as run_powershell rather than
     introducing a second switch, and that is a deliberate security decision.
-    With BIONIC_PROJECT_ROOTS unset the only writable location is the download
+    With WAMCP_PROJECT_ROOTS unset the only writable location is the download
     root -- a sandbox the operator has already accepted -- so a default
     install cannot modify source code anywhere. Granting write access to a
     real project is the same single action that grants the right to run cmake
@@ -640,10 +649,21 @@ def resolve_write_path(requested: str) -> Path:
         if name in {protected.lower() for protected in PROTECTED_CONFIG_FILENAMES}:
             raise ProtectedPathError(
                 f"'{name}' is server configuration and cannot be written by a "
-                f"tool. It decides which hosts may be read and which "
-                f"directories are writable, so only the operator may change "
-                f"it. Ask the user to edit it, or to run: "
+                f"tool. It decides which hosts may be read, so only the "
+                f"operator may change it. Ask the user to run: "
                 f"python -m windows_agent_mcp.hostgrants --add HOST"
+            )
+
+    for parts in (
+        {p.lower() for p in candidate.parts[-2:]},
+        {p.lower() for p in resolved.parts[-2:]},
+    ):
+        if parts == {part.lower() for part in PROTECTED_PATH_SUFFIX}:
+            raise ProtectedPathError(
+                f"'{'/'.join(PROTECTED_PATH_SUFFIX)}' is the server's own "
+                f"settings file and cannot be written by a tool. It decides "
+                f"which directories are writable and which tools load, so only "
+                f"the operator may change it. Ask the user to edit it."
             )
 
     for root in allowed:

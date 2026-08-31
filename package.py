@@ -39,20 +39,18 @@ INCLUDED_FILES: tuple[str, ...] = (
     # only had to drift once to be wrong.
     "uv.lock",
     "README.md",
-    # CLAUDE.md stays at the repository ROOT rather than moving into docs/
-    # with its siblings: that is where an AI coding tool looks for it, and
-    # a copy under docs/ would simply never be read.
-    "CLAUDE.md",
     # The step-by-step guide for a copied project. Forgetting this one would
     # ship the archive without the file that explains the archive; a test
     # asserts every document is listed here.
     "docs/HOW_TO_USE.md",
+    "docs/TEST_PROMPTS.md",
     "docs/CHANGELOG.md",
     "docs/CONTRIBUTING.md",
     "LICENSE",
     ".env.example",
     ".editorconfig",
     ".gitignore",
+    ".gitattributes",
     ".pre-commit-config.yaml",
     "run_server.bat",
     "bootstrap.py",
@@ -65,12 +63,14 @@ INCLUDED_FILES: tuple[str, ...] = (
 #   .venv               absolute paths are baked into its scripts, it is large,
 #                       and it is specific to one Python build. bootstrap.py
 #                       recreates it on the target.
-#   mcp-profiles.json   holds BIONIC_PROJECT_ROOTS paths that mean nothing
-#                       elsewhere. The target runs `profiles --init`.
+#   input/              config.json holds WAMCP_PROJECT_ROOTS paths that mean
+#                       nothing elsewhere. The target generates its own on the
+#                       first run.
 #   mcp-allowed-hosts.json
 #                       web hosts trusted on ONE machine. A trust decision
 #                       should be made again there, not inherited.
-#   .vscode/            only a gitignored settings file.
+#   *_claude.md         local working notes and design rationale. Not
+#                       published, and nothing tracked may depend on them.
 #   dist/               output of this script.
 
 # Cache directories pruned inside the included trees.
@@ -327,7 +327,10 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print(f"  {len(files)} files, {_human(total)} uncompressed")
         print()
-        print("  Excluded by the allowlist: .venv, mcp-profiles.json, .vscode, dist")
+        print(
+            "  Excluded by the allowlist: .venv, input/, "
+            "mcp-allowed-hosts.json, .vscode, dist"
+        )
         return 0
 
     if options.dest:
@@ -374,7 +377,7 @@ def main(argv: list[str] | None = None) -> int:
     # grants file in particular: a trust decision should be made again on the
     # new machine, not inherited from a zip.
     print(
-        "Not included (recreated there): .venv, mcp-profiles.json, "
+        "Not included (recreated there): .venv, input/config.json, "
         "mcp-allowed-hosts.json"
     )
 

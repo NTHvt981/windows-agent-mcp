@@ -120,7 +120,7 @@ pytest --cov=windows_agent_mcp --cov-report=term-missing
   `tests/test_network_validation.py`) rather than resolving real hosts, so the
   suite is deterministic and runs offline.
 - **Never write into the repository.** Use `tmp_path`, and `monkeypatch.setenv`
-  for `BIONIC_DOWNLOAD_ROOT` / `BIONIC_PROJECT_ROOTS`.
+  for `WAMCP_DOWNLOAD_ROOT` / `WAMCP_PROJECT_ROOTS`.
 - Use the `assert_success_response` / `assert_error_response` helpers in
   `conftest.py` when asserting on the error envelope.
 - Prefer table-driven `@pytest.mark.parametrize` cases for validation logic.

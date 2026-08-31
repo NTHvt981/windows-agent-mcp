@@ -30,7 +30,9 @@ MAX_PROCESS_OUTPUT_CHARS: int = 64 * 1024
 def get_windows_development_environment() -> dict[str, str]:
     """Build a Windows environment using the current process environment plus the current machine/user PATH.
 
-    This is useful when Bionic/Inspector was started before development tools were installed or PATH was changed.
+    This matters because a process inherits PATH at launch and never sees
+    later changes: a Vulkan SDK or compiler installed after the server
+    started would otherwise be invisible to every tool that looks for it.
 
     Returns:
         Environment dictionary with merged and normalized PATH.

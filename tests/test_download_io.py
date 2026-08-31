@@ -133,7 +133,7 @@ def test_download_sends_a_user_agent(
     request = fake.requests[0]
 
     assert request.get_method() == "GET"
-    assert "Bionic" in request.get_header("User-agent", "")
+    assert "windows-agent-mcp" in request.get_header("User-agent", "")
 
 
 # ============================================================

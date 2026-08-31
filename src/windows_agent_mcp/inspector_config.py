@@ -9,9 +9,9 @@ That is a deliberate measure so a client cannot leak its own secrets into every
 server it launches.
 
 The consequence for this project is severe and was invisible for a while:
-running under the Inspector, `set BIONIC_TOOLS=core,docs` had NO effect,
+running under the Inspector, `set WAMCP_TOOLS=core,docs` had NO effect,
 because the variable never reached the server process. The same was true of
-BIONIC_PROJECT_ROOTS and BIONIC_WEB_RESEARCH -- so `--dev --web` quietly gave
+WAMCP_PROJECT_ROOTS and WAMCP_WEB_RESEARCH -- so `--dev --web` quietly gave
 you a server with research mode off, and a project root set for a `--dev`
 session quietly left writes confined to the download sandbox.
 
@@ -49,22 +49,22 @@ SERVER_NAME = "windows-agent-mcp"
 # a Windows console Python would otherwise default to cp1252 and mangle any
 # non-ASCII byte in the stream.
 FORWARDED_ENV_VARS: tuple[str, ...] = (
-    "BIONIC_TOOLS",
+    "WAMCP_TOOLS",
     # Without this, `--dev --profile cpp` would silently do nothing -- the same
-    # invisible failure BIONIC_TOOLS had before this module existed.
-    "BIONIC_PROFILE",
-    "BIONIC_PROFILES_FILE",
-    "BIONIC_WEB_RESEARCH",
-    "BIONIC_SEARCH_BACKEND",
-    "BIONIC_PROJECT_ROOTS",
-    "BIONIC_DOWNLOAD_ROOT",
+    # invisible failure WAMCP_TOOLS had before this module existed.
+    "WAMCP_PROFILE",
+    "WAMCP_CONFIG_FILE",
+    "WAMCP_WEB_RESEARCH",
+    "WAMCP_SEARCH_BACKEND",
+    "WAMCP_PROJECT_ROOTS",
+    "WAMCP_DOWNLOAD_ROOT",
     # Host grants. Omitting these would reproduce the original bug in
     # miniature: an operator who granted a host would find it refused under
     # --dev, with nothing to indicate the grant had not been delivered.
-    "BIONIC_ALLOWED_HOSTS_FILE",
-    "BIONIC_EXTRA_DOC_HOSTS",
-    "BIONIC_HOST_CONSENT",
-    "BIONIC_HOST_GRANT_PERSIST",
+    "WAMCP_ALLOWED_HOSTS_FILE",
+    "WAMCP_EXTRA_DOC_HOSTS",
+    "WAMCP_HOST_CONSENT",
+    "WAMCP_HOST_GRANT_PERSIST",
     "PYTHONIOENCODING",
     "PYTHONUNBUFFERED",
 )
@@ -77,7 +77,7 @@ def build_config(
     """Build the Inspector config that launches this server.
 
     Only variables that are actually set are included. An empty `env` block is
-    fine, and is better than emitting empty strings -- `BIONIC_WEB_RESEARCH=""`
+    fine, and is better than emitting empty strings -- `WAMCP_WEB_RESEARCH=""`
     is falsy today, but writing a variable the operator never set invites a
     future truthiness change to turn it on by accident.
 

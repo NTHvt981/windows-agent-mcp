@@ -5,7 +5,7 @@ documentation hosts (`utils.ALLOWED_DOC_HOSTS`), and everything else needs
 research mode -- which is all-or-nothing and requires restarting the server.
 So when a model hit a legitimate but unlisted host, the denial told it to "ask
 the user", and the user's only available answer was "set
-BIONIC_WEB_RESEARCH=1 and restart", i.e. open the network posture completely.
+WAMCP_WEB_RESEARCH=1 and restart", i.e. open the network posture completely.
 There was no way to say "yes, that one host".
 
 This module is that way. Hosts named here are added to ALLOWED_DOC_HOSTS for
@@ -71,13 +71,13 @@ __all__: list[str] = [
 DEFAULT_GRANTS_FILENAME = "mcp-allowed-hosts.json"
 
 # Points at a grants file elsewhere, for a client whose working directory is
-# not the repository. Mirrors BIONIC_PROFILES_FILE.
-GRANTS_FILE_ENV_VAR = "BIONIC_ALLOWED_HOSTS_FILE"
+# not the repository. Mirrors WAMCP_PROFILES_FILE.
+GRANTS_FILE_ENV_VAR = "WAMCP_ALLOWED_HOSTS_FILE"
 
 # Hosts as a plain list, for the case where a file is awkward: some MCP clients
 # expose an `env` block and nothing else, and a profile can carry a per-profile
 # value. Merged with the file rather than overriding it.
-EXTRA_HOSTS_ENV_VAR = "BIONIC_EXTRA_DOC_HOSTS"
+EXTRA_HOSTS_ENV_VAR = "WAMCP_EXTRA_DOC_HOSTS"
 
 # Opt-in for writing an approved host back to the grants file.
 #
@@ -88,7 +88,7 @@ EXTRA_HOSTS_ENV_VAR = "BIONIC_EXTRA_DOC_HOSTS"
 # dies with the process; a persisted one would be permanent. Persisting
 # therefore requires the operator to say, once, that their client really does
 # put the question to a person.
-PERSIST_ENV_VAR = "BIONIC_HOST_GRANT_PERSIST"
+PERSIST_ENV_VAR = "WAMCP_HOST_GRANT_PERSIST"
 
 _TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
 
@@ -96,8 +96,8 @@ _TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
 # rather than a best-effort read.
 SCHEMA_VERSION = 1
 
-# Separators accepted in BIONIC_EXTRA_DOC_HOSTS. Comma is the natural one;
-# semicolon matches BIONIC_PROJECT_ROOTS, and whitespace costs nothing to
+# Separators accepted in WAMCP_EXTRA_DOC_HOSTS. Comma is the natural one;
+# semicolon matches WAMCP_PROJECT_ROOTS, and whitespace costs nothing to
 # accept. cmd.exe splits batch arguments on commas AND semicolons, so a
 # launcher flag will arrive pre-split -- accepting both means the rejoined
 # value parses either way.
@@ -136,7 +136,7 @@ def find_grants_file() -> Path:
 
     Order, most explicit first:
 
-    1. BIONIC_ALLOWED_HOSTS_FILE.
+    1. WAMCP_ALLOWED_HOSTS_FILE.
     2. `mcp-allowed-hosts.json` in the current directory. The launcher pushd's
        to the repository root, so this is the normal case.
     3. The repository root inferred from this file's location, but only for an
@@ -232,7 +232,7 @@ def normalise_host(raw: str) -> str:
 
 
 def parse_host_list(raw: str | None) -> tuple[frozenset[str], list[str]]:
-    """Parse a separated host list, as used by BIONIC_EXTRA_DOC_HOSTS.
+    """Parse a separated host list, as used by WAMCP_EXTRA_DOC_HOSTS.
 
     Args:
         raw: Separated list, or None.
@@ -449,7 +449,7 @@ def granted_hosts() -> tuple[frozenset[str], str | None]:
     """Every host the operator has approved, from all three sources.
 
     Sources are merged rather than ranked: a host is granted if any of the
-    grants file, BIONIC_EXTRA_DOC_HOSTS, or an elicitation this session says
+    grants file, WAMCP_EXTRA_DOC_HOSTS, or an elicitation this session says
     so. There is no "deny" entry to conflict with -- `"enable": false` removes
     a host from the file's contribution, it does not veto the others -- so
     merging cannot produce a surprising result.

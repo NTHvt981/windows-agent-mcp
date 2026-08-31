@@ -2,7 +2,7 @@
 
 Only DuckDuckGo ships today. The Protocol exists so Brave or a self-hosted
 SearXNG can be added without touching the tool, selected by
-BIONIC_SEARCH_BACKEND.
+WAMCP_SEARCH_BACKEND.
 
 The design problem here is not fetching results -- it is telling three
 outcomes apart:
@@ -466,7 +466,7 @@ def get_backend(name: str | None = None) -> SearchBackend:
     """Return the configured search backend.
 
     Args:
-        name: Backend name. Defaults to BIONIC_SEARCH_BACKEND, then
+        name: Backend name. Defaults to WAMCP_SEARCH_BACKEND, then
             "duckduckgo".
 
     Returns:

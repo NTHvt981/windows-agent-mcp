@@ -32,7 +32,7 @@ class FakeCompleted:
 def fake_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Stub subprocess.run and record the call it received."""
 
-    monkeypatch.setenv("BIONIC_DOWNLOAD_ROOT", str(tmp_path / "dl"))
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(tmp_path / "dl"))
 
     calls: list[dict[str, Any]] = []
 
@@ -191,7 +191,7 @@ def test_runs_in_an_approved_working_directory(
     project = tmp_path / "project"
     project.mkdir()
 
-    monkeypatch.setenv("BIONIC_PROJECT_ROOTS", str(project))
+    monkeypatch.setenv("WAMCP_PROJECT_ROOTS", str(project))
 
     calls = fake_run(FakeCompleted())
 

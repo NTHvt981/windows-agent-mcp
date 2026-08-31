@@ -74,7 +74,7 @@ def get_github_latest_release(
         request = urllib.request.Request(
             url,
             headers={
-                "User-Agent": "Bionic-Windows-Agent-MCP/1.0",
+                "User-Agent": "windows-agent-mcp/1.0",
                 "Accept": "application/vnd.github+json",
             },
             method="GET",
