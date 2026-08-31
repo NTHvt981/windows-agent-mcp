@@ -17,6 +17,45 @@ __all__: list[str] = ["search_files"]
 # context window for a single hit.
 _MAX_LINE_CHARS = 300
 
+# Regex syntax strong enough to imply the caller MEANT a regex. Deliberately
+# narrow: a bare "(" or "." is excluded, because searching literally for
+# "mcp_error(" or "self.name" is both common and correct, and warning about
+# those would train the reader to ignore the note. A backslash escape or a
+# ".*" quantifier is different -- it almost never appears in the source text
+# someone is looking for.
+_REGEX_INTENT = re.compile(
+    r"""
+      \\[dDsSwWbBAZ().\[\]{}+*?^$|]   # an escape: \( \. \d \s ...
+    | \.[*+]                          # .* or .+
+    | \[\^                            # a negated character class
+    """,
+    re.VERBOSE,
+)
+
+
+def _regex_intent_hint(pattern: str, regex: bool) -> str | None:
+    r"""Warn when a literal search was handed something that looks like a regex.
+
+    Measured failure: a model narrowed a truncated search to
+    `return mcp_error\(` without setting regex=True, so the escape was matched
+    literally and the search reported "No matches." It then retried variants of
+    the same broken pattern and finally answered from the earlier truncated
+    result as though it were complete.
+
+    The generic "if you expected matches" note pointed at excluded build
+    directories and a narrow file_glob -- both wrong, and both plausible enough
+    to act on. Naming the real cause is the difference between one more call
+    and a wrong answer.
+    """
+
+    if regex or not _REGEX_INTENT.search(pattern):
+        return None
+
+    return (
+        "The pattern contains regex syntax but was searched literally. "
+        "Pass regex=True to treat it as a regular expression."
+    )
+
 
 def search_files(
     pattern: str,
@@ -121,7 +160,14 @@ def search_files(
         # literal and regex searches.
         matcher = re.compile(re.escape(pattern), flags)
 
-    max_results = max(1, min(int(max_results), MAX_SEARCH_MATCHES))
+    # Remembered so the cap can be reported. Raising max_results past the
+    # ceiling used to be silently ignored, which is indistinguishable from the
+    # search simply having that many matches: a model asked for 200, then 300,
+    # got the identical truncated result each time, and had no way to learn
+    # that the parameter it was adjusting did nothing.
+    requested_results = int(max_results)
+
+    max_results = max(1, min(requested_results, MAX_SEARCH_MATCHES))
 
     patterns = split_globs(file_glob)
 
@@ -201,12 +247,18 @@ def search_files(
                 f"(skipped {skipped_binary} binary and {unreadable} unreadable files)"
             )
 
-        detail.extend(
-            [
-                "",
-                "If you expected matches: build and version-control "
-                "directories are excluded, and file_glob may be too narrow.",
-            ]
+        detail.append("")
+
+        # Before the generic advice: when it applies it is almost always the
+        # answer, and the generic note sends the reader somewhere else.
+        hint = _regex_intent_hint(pattern, regex)
+
+        if hint is not None:
+            detail.append(hint)
+
+        detail.append(
+            "If you expected matches: build and version-control "
+            "directories are excluded, and file_glob may be too narrow."
         )
 
         return "\n".join(detail)
@@ -218,7 +270,23 @@ def search_files(
             f"...[truncated at {max_results} results; there are at least "
             f"{total_matches}]..."
         )
-        body.append("Narrow the search with file_glob or a longer pattern.")
+        # Spelled out because the observed failure was not a missing notice --
+        # the model read this one, tried to narrow, and then answered from the
+        # truncated list anyway, counting these lines to state a total that was
+        # wrong by a third.
+        body.append(
+            "This list is INCOMPLETE. Do not report it as every match, and do "
+            "not count these lines to give a total."
+        )
+        if requested_results > MAX_SEARCH_MATCHES:
+            # Said plainly, because the obvious next move is to ask for more
+            # and that move does nothing.
+            body.append(
+                f"(max_results={requested_results} was capped at "
+                f"{MAX_SEARCH_MATCHES}; asking for more will not return more.)"
+            )
+
+        body.append("Narrow the search with file_glob or a longer pattern instead.")
     else:
         body.append(f"{total_matches} matches in {files_with_matches} files")
 

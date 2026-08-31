@@ -387,9 +387,21 @@ tree — prefer it over reading files one at a time.
 - `file_glob` (string, optional): Restrict to matching files, e.g. `"*.cpp,*.h"`
 - `ignore_case` (boolean, optional): Case-insensitive matching
 - `regex` (boolean, optional): Treat `pattern` as a Python regular expression
-- `max_results` (integer, optional): 1–100. Defaults to 100
+- `max_results` (integer, optional): 1–100. Defaults to 100. Values above 100
+  are capped, and the output says so — asking for more does not return more
 
 **Returns:** One `relative/path:line: content` per match, then a summary.
+
+A truncated result states that the list is **incomplete** and that its lines
+must not be counted for a total. That wording is deliberate: a model read the
+plain truncation notice, tried to narrow, failed, and then answered from the
+truncated list anyway with a total a third short.
+
+A literal search whose pattern contains regex syntax — `\(`, `\d`, `.*` — and
+which finds nothing says so and names `regex=True`. Without that, the generic
+"build directories are excluded" advice points at the wrong cause; a bare `(`
+or `.` is not flagged, because searching literally for `mcp_error(` is both
+common and correct.
 
 **Errors:** `INVALID_PATTERN`, `PATH_NOT_FOUND`, `PATH_IS_NOT_DIRECTORY`,
 `SEARCH_FAILED`

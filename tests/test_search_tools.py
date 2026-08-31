@@ -145,6 +145,81 @@ def test_search_truncates_and_says_so(tree) -> None:
     assert "Narrow the search" in result
 
 
+def test_truncation_forbids_reporting_the_list_as_complete(tree) -> None:
+    """The notice alone was not enough.
+
+    A model read "truncated at 100 results", tried to narrow, failed, and then
+    answered from the truncated list anyway -- counting its lines to state a
+    total that was wrong by a third. So the notice says what not to do.
+    """
+
+    result = search_files("void", str(tree), max_results=1)
+
+    assert "INCOMPLETE" in result
+    assert "do not count these lines" in result.lower()
+
+
+def test_a_capped_max_results_is_reported(tmp_path) -> None:
+    """Raising max_results past the ceiling is silently ignored, so say it.
+
+    Measured: after a truncated search a model asked for 200, then 300, got the
+    identical result each time, and never learned the parameter did nothing.
+    An ignored argument that looks like it worked is a loop.
+    """
+
+    (tmp_path / "many.cpp").write_text("void f();\n" * 150, encoding="utf-8")
+
+    result = search_files("void", str(tmp_path), max_results=500)
+
+    assert "truncated at 100 results" in result
+    assert "was capped at" in result
+    assert "500" in result
+    assert "will not return more" in result
+
+
+def test_capping_is_silent_when_the_result_was_not_truncated(tree) -> None:
+    """Nothing was lost, so the cap did not matter -- saying so is noise."""
+
+    result = search_files("void", str(tree), max_results=500)
+
+    assert "was capped at" not in result
+
+
+def test_literal_search_with_regex_syntax_says_so(tree) -> None:
+    r"""`foo\(` searched literally finds nothing, and the reason is not obvious.
+
+    Measured: a model narrowed a truncated search to `return mcp_error\(`
+    without regex=True, got "No matches", and was pointed at excluded build
+    directories -- which was not the cause.
+    """
+
+    result = search_files(r"void frobnicate\(", str(tree))
+
+    assert "No matches." in result
+    assert "regex=True" in result
+
+    # Ahead of the generic advice: when it applies it is almost always the
+    # answer, and the generic note sends the reader somewhere else.
+    assert result.index("regex=True") < result.index("version-control")
+
+
+def test_regex_hint_is_silent_when_it_would_mislead(tree) -> None:
+    """A bare "(" or "." is ordinary in a literal code search."""
+
+    for pattern in ("frobnicate(", "cfg.value", "MISSING_CONSTANT"):
+        result = search_files(pattern, str(tree))
+
+        assert "No matches." in result
+        assert "regex=True" not in result
+
+
+def test_regex_hint_is_silent_when_regex_is_already_on(tree) -> None:
+    result = search_files(r"void frobnicate\(", str(tree), regex=True)
+
+    assert "No matches." in result
+    assert "regex=True" not in result
+
+
 def test_search_truncates_a_very_long_line(tmp_path) -> None:
     """One generated line must not consume the whole context window."""
 

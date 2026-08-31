@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `search_files` now says when a literal search was handed regex syntax. A
+  pattern containing `\(`, `\d` or `.*` that finds nothing reports the likely
+  cause and names `regex=True`, ahead of the generic "build directories are
+  excluded" note — which was the advice given before, and was wrong. A bare
+  `(` or `.` is deliberately not flagged: searching literally for `mcp_error(`
+  is both common and correct.
+
+- `search_files` reports a capped `max_results`. Values above the ceiling were
+  silently clamped, which looks exactly like a search that really does have
+  that many matches.
+
+  These two came from one measured session. A model hit a truncated search,
+  correctly decided to narrow, and narrowed to `return mcp_error\(` without
+  setting `regex=True`. The escape was matched literally, the search reported
+  "No matches", and the advice pointed at excluded build directories. It then
+  raised `max_results` to 200 and to 300 — both silently clamped to 100, giving
+  the identical result each time — before answering from the original truncated
+  list as though it were complete, understating the total by a third.
+
+  Every step it took was reasonable. Both dead ends are now named.
+
 - `get_server_info` now reports `registered_tools` (the live tool names, in
   registration order) and `tools_by_group` (every group's membership, inactive
   groups included).
@@ -23,6 +44,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `tools_by_group` also makes "why can I not see `compile_shader`" answerable
   by reading: the name appears under `build`, and `build` is absent from
   `active_tool_groups`.
+
+### Changed
+
+- A truncated `search_files` result now states that the list is **incomplete**
+  and that its lines must not be counted to produce a total. The previous
+  notice reported the truncation accurately and was read, understood, and then
+  not acted on; the count it produced was wrong by a third.
 
 ### Fixed
 
