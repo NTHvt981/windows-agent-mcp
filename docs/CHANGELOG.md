@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `get_server_info` now reports `registered_tools` (the live tool names, in
+  registration order) and `tools_by_group` (every group's membership, inactive
+  groups included).
+
+  It previously reported only `registered_tool_count`, so "which tools do you
+  have" was not answerable from it. A 9B model asked that question called the
+  tool, read the count, and then filled in the names from its *client's* tool
+  list — attributing shell, git and file-writing tools to this server's
+  read-only `core` group, and inventing a membership for `docs`. The group
+  names it gave were correct; everything about their contents was not.
+
+  `tools_by_group` also makes "why can I not see `compile_shader`" answerable
+  by reading: the name appears under `build`, and `build` is absent from
+  `active_tool_groups`.
+
 ### Fixed
 
 - `get_system_info` reported the wrong Windows version. It returned `release`

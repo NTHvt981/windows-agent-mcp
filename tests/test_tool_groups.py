@@ -527,6 +527,58 @@ def test_server_info_default_reporting() -> None:
     assert "research" not in payload["active_tool_groups"]
 
 
+def test_server_info_names_the_registered_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The count alone is not an answer to "which tools do you have".
+
+    Asked that question with only a count available, a 9B model filled the gap
+    from its CLIENT's tool list and attributed shell, git and file-writing
+    tools to this server's read-only core group.
+    """
+
+    monkeypatch.setenv(TOOL_GROUPS_ENV_VAR, "build")
+
+    payload = json.loads(get_server_info())
+
+    names = payload["registered_tools"]
+
+    assert len(names) == payload["registered_tool_count"]
+    assert "compile_shader" in names
+    assert "write_file" not in names
+
+    # Registration order, not alphabetical: TOOLS declares a workflow ordering
+    # and it steers which tool a small model reaches for first.
+    assert names == [tool.__name__ for tool in get_tools(groups={"core", "build"})]
+
+
+def test_server_info_maps_every_group_to_its_tools() -> None:
+    """Including inactive groups -- that is what makes a missing tool findable."""
+
+    payload = json.loads(get_server_info())
+
+    mapping = payload["tools_by_group"]
+
+    assert set(mapping) == VALID_TOOL_GROUPS
+
+    for group, tools in TOOL_GROUPS.items():
+        assert mapping[group] == [tool.__name__ for tool in tools]
+
+
+def test_server_info_shows_an_inactive_tool_and_its_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The "why can I not see compile_shader" case, answered in one call."""
+
+    monkeypatch.setenv(TOOL_GROUPS_ENV_VAR, "core")
+
+    payload = json.loads(get_server_info())
+
+    assert "compile_shader" not in payload["registered_tools"]
+    assert "compile_shader" in payload["tools_by_group"]["build"]
+    assert "build" not in payload["active_tool_groups"]
+
+
 # ============================================================
 # main() honours the environment
 # ============================================================

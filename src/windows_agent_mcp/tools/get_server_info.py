@@ -102,7 +102,12 @@ def get_server_info() -> str:
     # scope here would be a cycle (main -> get_server_info -> main). config
     # imports main, so it has the same constraint.
     from ..config import find_config_file, load_config, resolve_profile
-    from ..main import get_tools
+    from ..main import TOOL_GROUPS, get_tools
+
+    # Kept in get_tools() order, not sorted: that order is the workflow
+    # ordering declared in TOOLS, and it steers which tool a small model
+    # reaches for first.
+    registered = get_tools(groups=groups)
 
     config_file = find_config_file()
 
@@ -135,7 +140,20 @@ def get_server_info() -> str:
             "tool_groups_env_var": TOOL_GROUPS_ENV_VAR,
             "active_tool_groups": sorted(groups),
             "available_tool_groups": sorted(VALID_TOOL_GROUPS),
-            "registered_tool_count": len(get_tools(groups=groups)),
+            "registered_tool_count": len(registered),
+            # The names, not just the count. Without them a model asked
+            # which tools it has answers from whatever its CLIENT also
+            # offers: measured, a 9B model attributed its client's shell,
+            # git and file-writing tools to this server's read-only core
+            # group, and invented a membership for docs.
+            "registered_tools": [tool.__name__ for tool in registered],
+            # Every group's membership, inactive ones included, so that
+            # "why can I not see compile_shader" is answered by reading
+            # rather than by guessing from the group name.
+            "tools_by_group": {
+                group: [tool.__name__ for tool in TOOL_GROUPS[group]]
+                for group in sorted(TOOL_GROUPS)
+            },
             "tool_groups_error": groups_error,
             # The config file is where every setting now lives, so a problem
             # with it is the likeliest cause of "my tool is missing" or "my

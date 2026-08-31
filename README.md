@@ -629,6 +629,17 @@ Get server configuration and status information. Includes `web_research`,
 *disabled* tool from a *missing* one, plus `granted_hosts` and
 `granted_hosts_error` for diagnosing a refused fetch.
 
+`registered_tools` names the tools that are actually live, in registration
+order, and `tools_by_group` maps every group — inactive ones included — to its
+members. Together they answer "why can I not see `compile_shader`" by reading
+rather than by inference: the name appears under `build`, and `build` is not in
+`active_tool_groups`.
+
+The names matter as much as the count. Asked which tools it had when only
+`registered_tool_count` was available, a 9B model filled the gap from its
+*client's* tool list and attributed shell, git and file-writing tools to this
+server's read-only `core` group.
+
 **Parameters:** None
 
 **Returns:** JSON object with server metadata
