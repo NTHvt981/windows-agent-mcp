@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `get_system_info` reported the wrong Windows version. It returned `release`
+  and `version` as separate fields; asked for the OS version, a 9B model quoted
+  `version` — `"10.0.26200"` — read the leading `10.` and answered "Windows 10"
+  on a Windows 11 machine, contradicting the `release` field beside it.
+
+  `os` is now the name and release already joined (`"Windows 11"`), and the NT
+  version is `os_build`. There is no longer a field called `version` for a
+  model to reach for when the question uses that word.
+
+  The value is also corrected against the build number, because
+  `platform.release()` genuinely returns `"10"` on Windows 11 under Python 3.10
+  and 3.11 (fixed upstream in 3.12; `requires-python` is `>=3.10`). Without
+  that, joining the fields would have produced a confident `"Windows 10"` on
+  those interpreters — worse than the inconsistency it replaced.
+
+  Found by driving a live model, not by the suite: the tool call was correct and
+  only the answer was wrong, so nothing here was failing.
+
 ## [1.0.0] - 2026-08-28
 
 First public release.

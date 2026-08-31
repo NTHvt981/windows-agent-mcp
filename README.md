@@ -641,7 +641,16 @@ Get system information about the host machine.
 
 **Parameters:** None
 
-**Returns:** JSON object with OS, architecture, Python version, etc.
+**Returns:** JSON object with OS, architecture, Python version and paths.
+
+`os` is the name and release already joined — `"Windows 11"`, not `"Windows"`
+plus a separate `"11"` — and `os_build` holds the NT version, `"10.0.26100"`.
+There is deliberately no field called `version`: a model asked for the OS
+version quoted the NT string, read its leading `10.` and answered "Windows 10".
+
+`os` is also corrected against the build number, because `platform.release()`
+returns `"10"` on Windows 11 under Python 3.10 and 3.11 — so on those
+interpreters the raw value is simply wrong.
 
 ---
 

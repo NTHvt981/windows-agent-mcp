@@ -16,6 +16,7 @@ import json
 import pytest
 
 from windows_agent_mcp.main import ALL_TOOLS, TOOLS, WEB_TOOLS, get_tools
+from windows_agent_mcp.tools import get_system_info as system_info_module
 from windows_agent_mcp.tools.build_project import build_project
 from windows_agent_mcp.tools.compile_shader import compile_shader
 from windows_agent_mcp.tools.download_file import download_file
@@ -281,8 +282,69 @@ def test_server_info(tmp_path, monkeypatch) -> None:
 def test_system_info() -> None:
     data = json.loads(get_system_info())
 
-    for field in ("os", "machine", "python_version"):
+    for field in ("os", "os_build", "machine", "python_version"):
         assert field in data
+
+
+def test_system_info_has_no_bare_version_field() -> None:
+    """`version` and `release` are gone, and must not come back.
+
+    A field called `version` sitting next to a question about the OS version is
+    what produced the failure this join exists to prevent: a model quoted
+    `10.0.26200` and answered "Windows 10". The name is the trap, so the guard
+    is on the name.
+    """
+
+    data = json.loads(get_system_info())
+
+    assert "version" not in data
+    assert "release" not in data
+
+
+@pytest.mark.parametrize(
+    ("release", "version", "expected"),
+    [
+        # platform.release() lies on Windows 11 before Python 3.12: it says
+        # "10". Measured on 3.10.20 and 3.11.15. The build number is the only
+        # way to tell, so it has to win.
+        ("10", "10.0.26100", "Windows 11"),
+        ("10", "10.0.22000", "Windows 11"),
+        # Genuine Windows 10 is below the threshold and must stay put.
+        ("10", "10.0.19045", "Windows 10"),
+        # Already correct on 3.12+; the correction must not fire.
+        ("11", "10.0.26100", "Windows 11"),
+    ],
+)
+def test_windows_release_corrected_from_build(
+    monkeypatch, release: str, version: str, expected: str
+) -> None:
+    monkeypatch.setattr(system_info_module.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(system_info_module.platform, "release", lambda: release)
+    monkeypatch.setattr(system_info_module.platform, "version", lambda: version)
+
+    assert json.loads(get_system_info())["os"] == expected
+
+
+def test_os_display_name_survives_missing_parts(monkeypatch) -> None:
+    """Never emit a bare "Windows " with the release missing."""
+
+    monkeypatch.setattr(system_info_module.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(system_info_module.platform, "release", lambda: "")
+    monkeypatch.setattr(system_info_module.platform, "version", lambda: "")
+
+    assert json.loads(get_system_info())["os"] == "Windows"
+
+    monkeypatch.setattr(system_info_module.platform, "system", lambda: "")
+
+    assert json.loads(get_system_info())["os"] == "unknown"
+
+
+def test_unparseable_build_leaves_release_alone(monkeypatch) -> None:
+    monkeypatch.setattr(system_info_module.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(system_info_module.platform, "release", lambda: "10")
+    monkeypatch.setattr(system_info_module.platform, "version", lambda: "not.a.build")
+
+    assert json.loads(get_system_info())["os"] == "Windows 10"
 
 
 def test_download_directory_created_from_override(tmp_path, monkeypatch) -> None:
