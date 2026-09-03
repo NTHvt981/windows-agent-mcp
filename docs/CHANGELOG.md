@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `WAMCP_WORKSPACE_FROM_CWD` — opt-in automatic workspace. When set to `1`, the
+  server also treats its own current directory as a writable root, so a launcher
+  that starts the server in the active project (opencode) needs no per-project
+  path. It **fails closed**: a cwd that resolves to a drive root, the home
+  directory (or an ancestor of it), or a system directory is refused, because
+  the dangerous failure of automatic detection is not a broken tool but a
+  silently wider write boundary. Off by default, so existing installs are
+  unchanged. It flows through the single `get_allowed_working_directories()`, so
+  writes and command execution widen together and reads stay unconfined — no
+  parallel path-security layer.
+
+  `get_server_info` now reports `server_cwd` (what directory the server was
+  launched in), `adopted_workspace` (the cwd if it was accepted, else null), and
+  `workspace_note` (why it was refused). `server_cwd` answers, without a debug
+  print, the one question a cwd-based workspace depends on: does the launcher
+  start the server in the project directory?
+
 - `search_files` now says when a literal search was handed regex syntax. A
   pattern containing `\(`, `\d` or `.*` that finds nothing reports the likely
   cause and names `regex=True`, ahead of the generic "build directories are

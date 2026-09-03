@@ -10,6 +10,7 @@ driven directly.
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -34,14 +35,117 @@ from windows_agent_mcp.tools.get_server_info import get_server_info
 from windows_agent_mcp.tools.search_files import search_files
 from windows_agent_mcp.tools.write_file import write_file
 from windows_agent_mcp.utils import (
+    WORKSPACE_FROM_CWD_ENV_VAR,
     get_allowed_working_directories,
     resolve_working_directory,
     resolve_write_path,
+    workspace_from_cwd,
 )
 
 # ============================================================
 # write_file I/O failures
 # ============================================================
+
+
+# ============================================================
+# WAMCP_WORKSPACE_FROM_CWD -- automatic cwd workspace
+# ============================================================
+
+
+def test_workspace_from_cwd_is_off_by_default(monkeypatch, tmp_path) -> None:
+    """Absent the env var, cwd is never adopted -- an existing install is
+    unaffected on upgrade."""
+
+    monkeypatch.delenv(WORKSPACE_FROM_CWD_ENV_VAR, raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    assert workspace_from_cwd() == (None, None)
+
+
+def test_workspace_from_cwd_adopts_a_safe_directory(monkeypatch, tmp_path) -> None:
+    project = tmp_path / "RaylibGame"
+    project.mkdir()
+
+    monkeypatch.setenv(WORKSPACE_FROM_CWD_ENV_VAR, "1")
+    monkeypatch.chdir(project)
+
+    adopted, note = workspace_from_cwd()
+
+    assert adopted == project.resolve()
+    assert note is None
+    # And it reaches the unified roots that writes and commands consult.
+    assert project.resolve() in get_allowed_working_directories()
+
+
+def test_workspace_from_cwd_makes_a_write_land_in_the_project(
+    monkeypatch, tmp_path
+) -> None:
+    project = tmp_path / "game"
+    project.mkdir()
+
+    monkeypatch.setenv(WORKSPACE_FROM_CWD_ENV_VAR, "1")
+    monkeypatch.chdir(project)
+
+    resolved = resolve_write_path("main.cpp")
+
+    assert resolved == (project / "main.cpp").resolve()
+
+
+def test_workspace_from_cwd_refuses_a_drive_or_filesystem_root(
+    monkeypatch, tmp_path
+) -> None:
+    """Fail closed: a launcher that starts the server at a root must NOT make the
+    whole drive writable. The failure is a wider boundary, not a broken tool."""
+
+    monkeypatch.setenv(WORKSPACE_FROM_CWD_ENV_VAR, "1")
+
+    fake_root = tmp_path.resolve().anchor  # e.g. "C:\\"
+
+    monkeypatch.setattr(
+        "windows_agent_mcp.utils.Path.cwd",
+        classmethod(lambda cls: Path(fake_root)),
+    )
+
+    adopted, note = workspace_from_cwd()
+
+    assert adopted is None
+    assert note is not None
+    assert "root" in note
+
+
+def test_workspace_from_cwd_refuses_the_home_directory(monkeypatch) -> None:
+    monkeypatch.setenv(WORKSPACE_FROM_CWD_ENV_VAR, "1")
+
+    home = Path.home().resolve()
+
+    monkeypatch.setattr(
+        "windows_agent_mcp.utils.Path.cwd",
+        classmethod(lambda cls: home),
+    )
+
+    adopted, note = workspace_from_cwd()
+
+    assert adopted is None
+    assert note is not None and "home" in note
+
+
+def test_workspace_from_cwd_reports_the_refusal_in_server_info(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(WORKSPACE_FROM_CWD_ENV_VAR, "1")
+
+    home = Path.home().resolve()
+
+    monkeypatch.setattr(
+        "windows_agent_mcp.utils.Path.cwd",
+        classmethod(lambda cls: home),
+    )
+
+    payload = json.loads(get_server_info())
+
+    assert payload["adopted_workspace"] is None
+    assert payload["workspace_note"] is not None
+    assert payload["server_cwd"]
 
 
 def test_write_reports_permission_denied(writable_project, monkeypatch) -> None:

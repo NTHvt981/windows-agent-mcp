@@ -458,6 +458,19 @@ def get_download_root() -> Path:
 # default behaviour is unchanged and widening it is opt-in.
 PROJECT_ROOTS_ENV_VAR: str = "WAMCP_PROJECT_ROOTS"
 
+# Opt-in: when truthy, the server's current directory is added to the writable
+# roots automatically. This exists for launchers (opencode, and MCP clients that
+# start the server with the active project as its cwd) so a workspace need not be
+# configured per project.
+#
+# Off by default, on purpose. Enabling it is a posture change -- it makes a
+# directory writable that WAMCP_PROJECT_ROOTS did not name -- so an existing
+# install is unaffected until the operator opts in once, and the automatic path
+# is guarded (see _unsafe_workspace_reason): the dangerous failure is not a
+# broken tool but a SILENTLY WIDER boundary if the server is ever launched at a
+# drive root or the home directory.
+WORKSPACE_FROM_CWD_ENV_VAR: str = "WAMCP_WORKSPACE_FROM_CWD"
+
 # Filename of the tool-group profiles file.
 #
 # Defined here rather than in profiles.py, which is the module that owns the
@@ -510,14 +523,98 @@ class ProtectedPathError(ValueError):
     """
 
 
+def _unsafe_workspace_reason(path: Path) -> str | None:
+    """Why `path` must not be auto-adopted as a writable workspace, else None.
+
+    Applies ONLY to the automatic cwd path, never to an explicit
+    WAMCP_PROJECT_ROOTS entry -- an operator who names a directory has made the
+    decision, but a launcher's cwd is inferred and must fail closed. The
+    rejected cases are the ones where adopting cwd would grant write access to
+    far more than a project: a drive or filesystem root, the home directory or
+    an ancestor of it, and the system directories. `path` is assumed resolved.
+    """
+
+    # A drive or filesystem root: C:\, D:\, a UNC share root, or "/". The anchor
+    # is its own parent.
+    if path == path.parent:
+        return "it is a filesystem or drive root"
+
+    try:
+        home = Path.home().resolve()
+    except (OSError, RuntimeError):
+        home = None
+
+    # The home directory itself, or any ancestor of it (e.g. C:\Users): adopting
+    # either would make every user's files writable.
+    if home is not None and home.is_relative_to(path):
+        return "it is the home directory or an ancestor of it"
+
+    for var in ("SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)"):
+        raw = os.environ.get(var)
+
+        if not raw:
+            continue
+
+        try:
+            system_dir = Path(raw).expanduser().resolve()
+        except OSError:
+            continue
+
+        if system_dir.is_relative_to(path):
+            return f"it is or contains a system directory ({system_dir})"
+
+    return None
+
+
+def workspace_from_cwd() -> tuple[Path | None, str | None]:
+    """The current directory as an automatic writable root, if enabled and safe.
+
+    Returns:
+        (path, None)   -- cwd adopted as a writable root.
+        (None, reason) -- enabled, but cwd was refused; reason is reportable.
+        (None, None)   -- the feature is off (the default).
+
+    The reason is surfaced by get_server_info so a refused cwd is visible rather
+    than looking like the feature silently doing nothing.
+    """
+
+    enabled = (
+        os.environ.get(WORKSPACE_FROM_CWD_ENV_VAR, "").strip().lower() in _TRUTHY_VALUES
+    )
+
+    if not enabled:
+        return None, None
+
+    try:
+        cwd = Path.cwd().resolve()
+    except OSError as exc:
+        return None, f"could not resolve the current directory: {exc}"
+
+    reason = _unsafe_workspace_reason(cwd)
+
+    if reason is not None:
+        return None, (
+            f"refused {cwd}: {reason}. Set {PROJECT_ROOTS_ENV_VAR} explicitly."
+        )
+
+    return cwd, None
+
+
 def get_allowed_working_directories() -> list[Path]:
-    """Return the roots that run_powershell may execute inside.
+    """Return the roots that run_powershell may execute inside, and writes reach.
 
     Always includes the download root. Additional roots come from
-    WAMCP_PROJECT_ROOTS, separated by os.pathsep (";" on Windows).
+    WAMCP_PROJECT_ROOTS, separated by os.pathsep (";" on Windows), and -- when
+    WAMCP_WORKSPACE_FROM_CWD is enabled and the current directory passes the
+    safety guard -- the server's cwd.
 
-    Non-existent configured roots are skipped rather than raising, so one
-    stale entry cannot disable the tool entirely.
+    This is the single source of writable roots: resolve_write_path and
+    resolve_working_directory both consult it, so widening it here widens both
+    writes and command execution together. read_file deliberately does NOT,
+    which is what keeps reads unconfined.
+
+    Non-existent configured roots are skipped rather than raising, so one stale
+    entry cannot disable the tool entirely.
 
     Returns:
         Resolved, existing directories, download root first, no duplicates.
@@ -542,6 +639,11 @@ def get_allowed_working_directories() -> list[Path]:
 
         if resolved.is_dir() and resolved not in roots:
             roots.append(resolved)
+
+    workspace, _ = workspace_from_cwd()
+
+    if workspace is not None and workspace.is_dir() and workspace not in roots:
+        roots.append(workspace)
 
     return roots
 

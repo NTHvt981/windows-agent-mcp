@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 from ..consent import CONSENT_ENV_VAR, consent_available
 from ..hostgrants import (
@@ -25,11 +26,13 @@ from ..utils import (
     TOOL_GROUPS_ENV_VAR,
     VALID_TOOL_GROUPS,
     WEB_RESEARCH_ENV_VAR,
+    WORKSPACE_FROM_CWD_ENV_VAR,
     active_tool_groups,
     get_allowed_working_directories,
     get_download_root,
     web_research_enabled,
     web_search_enabled,
+    workspace_from_cwd,
 )
 
 __all__: list[str] = ["get_server_info"]
@@ -95,6 +98,13 @@ def get_server_info() -> str:
         )
 
     writable = get_allowed_working_directories()
+
+    # server_cwd answers the one open question a launcher-based (cwd) workspace
+    # depends on -- "what directory did opencode start the server in" -- without
+    # a debug print. adopted_workspace / workspace_note report whether that cwd
+    # was accepted as writable or refused by the safety guard, and why.
+    server_cwd = str(Path.cwd())
+    adopted_workspace, workspace_note = workspace_from_cwd()
 
     groups, groups_error = active_tool_groups()
 
@@ -172,7 +182,23 @@ def get_server_info() -> str:
             # denied" into something the model can explain to the user.
             "writable_roots": [str(root) for root in writable],
             "project_roots_env_var": PROJECT_ROOTS_ENV_VAR,
-            "project_roots_configured": len(writable) > 1,
+            # Tied to the env var, not to len(writable): the cwd workspace can
+            # add a root on its own, and conflating the two would report project
+            # roots as configured when only WAMCP_WORKSPACE_FROM_CWD is on.
+            "project_roots_configured": bool(
+                os.environ.get(PROJECT_ROOTS_ENV_VAR, "").strip()
+            ),
+            # The current directory, and whether it was adopted as a writable
+            # workspace. server_cwd is always reported so a launcher-based setup
+            # can confirm what cwd it gets; adopted_workspace is null unless
+            # WAMCP_WORKSPACE_FROM_CWD is on and the guard accepted it, and
+            # workspace_note carries the refusal reason when it did not.
+            "server_cwd": server_cwd,
+            "workspace_from_cwd_env_var": WORKSPACE_FROM_CWD_ENV_VAR,
+            "adopted_workspace": (
+                str(adopted_workspace) if adopted_workspace is not None else None
+            ),
+            "workspace_note": workspace_note,
             "web_research": research,
             "web_research_env_var": WEB_RESEARCH_ENV_VAR,
             "documentation_hosts": sorted(ALLOWED_DOC_HOSTS),

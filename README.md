@@ -688,6 +688,7 @@ interpreters the raw value is simply wrong.
 | `WAMCP_CONFIG_FILE` | Path to the config file, if not `./input/config.json` | *(unset)* |
 | `WAMCP_DOWNLOAD_ROOT` | Sandbox directory for downloads | `%LOCALAPPDATA%\windows-agent-mcp\downloads` |
 | `WAMCP_PROJECT_ROOTS` | Roots that `run_powershell`, `build_project` and `compile_shader` may execute inside, **and** that `write_file` / `edit_file` may write to. `;`-separated | *(unset — download root only)* |
+| `WAMCP_WORKSPACE_FROM_CWD` | Set to `1` to also treat the server's current directory as a writable root — for launchers (opencode) that start the server in the active project, so no per-project path is needed. Refused if cwd is a drive root, the home directory, or a system directory; the refusal is visible in `get_server_info` (`adopted_workspace`, `workspace_note`) | *(unset — off)* |
 | `WAMCP_WEB_RESEARCH` | Set to `1` to register `web_search` and allow `fetch_web_page` to reach any public host | *(unset — documentation hosts only)* |
 | `WAMCP_EXTRA_DOC_HOSTS` | Extra hostnames `fetch_web_page` may **read**, `,`- or `;`-separated. Merged with `mcp-allowed-hosts.json`. See [Granting one host](#granting-one-host) | *(unset)* |
 | `WAMCP_ALLOWED_HOSTS_FILE` | Path to the granted-hosts file, if not `./mcp-allowed-hosts.json` | *(unset)* |
