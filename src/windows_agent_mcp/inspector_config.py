@@ -58,6 +58,7 @@ FORWARDED_ENV_VARS: tuple[str, ...] = (
     "WAMCP_SEARCH_BACKEND",
     "WAMCP_PROJECT_ROOTS",
     "WAMCP_WORKSPACE_FROM_CWD",
+    "WAMCP_LAUNCH_CWD",
     "WAMCP_DOWNLOAD_ROOT",
     # Host grants. Omitting these would reproduce the original bug in
     # miniature: an operator who granted a host would find it refused under

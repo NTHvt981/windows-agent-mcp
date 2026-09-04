@@ -17,6 +17,7 @@ from ..hostgrants import (
 )
 from ..utils import (
     ALLOWED_DOC_HOSTS,
+    LAUNCH_CWD_ENV_VAR,
     MAX_DOWNLOAD_BYTES,
     MAX_HTTP_BYTES,
     PROFILE_ENV_VAR,
@@ -104,6 +105,7 @@ def get_server_info() -> str:
     # a debug print. adopted_workspace / workspace_note report whether that cwd
     # was accepted as writable or refused by the safety guard, and why.
     server_cwd = str(Path.cwd())
+    launch_cwd = os.environ.get(LAUNCH_CWD_ENV_VAR, "") or None
     adopted_workspace, workspace_note = workspace_from_cwd()
 
     groups, groups_error = active_tool_groups()
@@ -194,6 +196,13 @@ def get_server_info() -> str:
             # WAMCP_WORKSPACE_FROM_CWD is on and the guard accepted it, and
             # workspace_note carries the refusal reason when it did not.
             "server_cwd": server_cwd,
+            # What run_server.bat captured as the launch directory (the project,
+            # if the launcher passed it) before pushd'ing to the server's own
+            # dir. When set, it is what the workspace is taken from, in
+            # preference to server_cwd. Null means the launcher did not record
+            # it -- the workspace then falls back to server_cwd, which is the
+            # install directory and almost never what you want.
+            "launch_cwd": launch_cwd,
             "workspace_from_cwd_env_var": WORKSPACE_FROM_CWD_ENV_VAR,
             "adopted_workspace": (
                 str(adopted_workspace) if adopted_workspace is not None else None

@@ -471,6 +471,14 @@ PROJECT_ROOTS_ENV_VAR: str = "WAMCP_PROJECT_ROOTS"
 # drive root or the home directory.
 WORKSPACE_FROM_CWD_ENV_VAR: str = "WAMCP_WORKSPACE_FROM_CWD"
 
+# Set by run_server.bat to the directory the launcher (opencode) started the
+# server in, captured BEFORE the launcher `pushd`'s to the script's own
+# directory. Without it, WAMCP_WORKSPACE_FROM_CWD would adopt the server's
+# install directory as the workspace instead of the project -- which is exactly
+# what get_server_info's server_cwd revealed. When set, workspace_from_cwd()
+# uses this in preference to Path.cwd().
+LAUNCH_CWD_ENV_VAR: str = "WAMCP_LAUNCH_CWD"
+
 # Filename of the tool-group profiles file.
 #
 # Defined here rather than in profiles.py, which is the module that owns the
@@ -585,10 +593,20 @@ def workspace_from_cwd() -> tuple[Path | None, str | None]:
     if not enabled:
         return None, None
 
+    # Prefer the launcher-captured directory over Path.cwd(). run_server.bat
+    # pushd's to the server's own install directory so it can find its .venv, so
+    # by the time Python runs Path.cwd() is that install directory, NOT the
+    # project the client (opencode) launched us from. The launcher records the
+    # original directory here before it pushd's; when present it is the project.
+    launch_cwd = os.environ.get(LAUNCH_CWD_ENV_VAR, "").strip()
+
     try:
-        cwd = Path.cwd().resolve()
+        if launch_cwd:
+            cwd = Path(launch_cwd).expanduser().resolve()
+        else:
+            cwd = Path.cwd().resolve()
     except OSError as exc:
-        return None, f"could not resolve the current directory: {exc}"
+        return None, f"could not resolve the workspace directory: {exc}"
 
     reason = _unsafe_workspace_reason(cwd)
 

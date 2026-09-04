@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `WAMCP_LAUNCH_CWD` — the launcher records the directory it was started in.
+  `run_server.bat` `pushd`'s to the server's own directory (to find its
+  `.venv`), so by the time Python runs, `Path.cwd()` is the *install* directory,
+  not the project the client launched from. `get_server_info`'s `server_cwd`
+  confirmed this: under opencode it read `…\windows-agent-mcp`, not the open
+  project — which made `WAMCP_WORKSPACE_FROM_CWD` adopt the wrong directory and
+  refuse writes to the actual project.
+
+  The launcher now captures `%CD%` **before** the `pushd` into `WAMCP_LAUNCH_CWD`,
+  and `workspace_from_cwd()` prefers it over `Path.cwd()`. `get_server_info`
+  reports it as `launch_cwd` so the captured directory is verifiable in one call.
+  The safety guard still applies — a launch directory that resolves to a drive
+  root, home, or system directory is refused.
+
 - `WAMCP_WORKSPACE_FROM_CWD` — opt-in automatic workspace. When set to `1`, the
   server also treats its own current directory as a writable root, so a launcher
   that starts the server in the active project (opencode) needs no per-project

@@ -35,6 +35,7 @@ from windows_agent_mcp.tools.get_server_info import get_server_info
 from windows_agent_mcp.tools.search_files import search_files
 from windows_agent_mcp.tools.write_file import write_file
 from windows_agent_mcp.utils import (
+    LAUNCH_CWD_ENV_VAR,
     WORKSPACE_FROM_CWD_ENV_VAR,
     get_allowed_working_directories,
     resolve_working_directory,
@@ -89,6 +90,55 @@ def test_workspace_from_cwd_makes_a_write_land_in_the_project(
     resolved = resolve_write_path("main.cpp")
 
     assert resolved == (project / "main.cpp").resolve()
+
+
+def test_launch_cwd_is_preferred_over_actual_cwd(monkeypatch, tmp_path) -> None:
+    """The launcher-captured project beats Path.cwd().
+
+    run_server.bat pushd's to the server's own directory, so Path.cwd() is the
+    install dir, not the project. WAMCP_LAUNCH_CWD carries the real project and
+    must win -- this is the exact fix for the server_cwd mismatch.
+    """
+
+    project = tmp_path / "opencode-test"
+    project.mkdir()
+    server_dir = tmp_path / "windows-agent-mcp"
+    server_dir.mkdir()
+
+    monkeypatch.setenv(WORKSPACE_FROM_CWD_ENV_VAR, "1")
+    monkeypatch.setenv(LAUNCH_CWD_ENV_VAR, str(project))
+    monkeypatch.chdir(server_dir)  # where the pushd left us
+
+    adopted, note = workspace_from_cwd()
+
+    assert adopted == project.resolve()  # the project, not server_dir
+    assert note is None
+
+
+def test_launch_cwd_falls_back_to_cwd_when_unset(monkeypatch, tmp_path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    monkeypatch.setenv(WORKSPACE_FROM_CWD_ENV_VAR, "1")
+    monkeypatch.delenv(LAUNCH_CWD_ENV_VAR, raising=False)
+    monkeypatch.chdir(project)
+
+    adopted, _ = workspace_from_cwd()
+
+    assert adopted == project.resolve()
+
+
+def test_launch_cwd_is_still_guarded(monkeypatch, tmp_path) -> None:
+    """A launcher that captured a drive root is refused just like Path.cwd()."""
+
+    monkeypatch.setenv(WORKSPACE_FROM_CWD_ENV_VAR, "1")
+    monkeypatch.setenv(LAUNCH_CWD_ENV_VAR, tmp_path.resolve().anchor)
+    monkeypatch.chdir(tmp_path)
+
+    adopted, note = workspace_from_cwd()
+
+    assert adopted is None
+    assert note is not None and "root" in note
 
 
 def test_workspace_from_cwd_refuses_a_drive_or_filesystem_root(

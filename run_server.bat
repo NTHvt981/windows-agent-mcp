@@ -15,6 +15,13 @@ REM  setlocal keeps the environment changes below out of your shell.
 REM ============================================================
 
 setlocal EnableExtensions
+
+REM Record the directory the launcher (opencode) started us in, BEFORE the
+REM pushd below moves us to the server's own directory. WAMCP_WORKSPACE_FROM_CWD
+REM uses this as the project workspace: after the pushd, Path.cwd() would be
+REM this script's directory, not the project. See workspace_from_cwd().
+if not defined WAMCP_LAUNCH_CWD set "WAMCP_LAUNCH_CWD=%CD%"
+
 pushd "%~dp0"
 
 set "DEV="
