@@ -73,7 +73,16 @@ _META_CHARSET_PATTERN = re.compile(
 
 # Zero-width and direction-control characters. Invisible to a reader, fully
 # visible to the model -- U+202E can make a displayed URL read backwards.
-_INVISIBLE_CHARACTERS = "​‌‍‎‏  ‪‫‬‭‮⁦⁧⁨⁩﻿"
+# Written as \uXXXX escapes on purpose: as raw characters here they made the
+# source file hold literal line separators (U+2028/U+2029). Do not paste them
+# back as raw.
+_INVISIBLE_CHARACTERS = (
+    "\u200b\u200c\u200d\u200e\u200f"  # zero-width + LTR/RTL marks
+    "\u2028\u2029"  # line + paragraph separators
+    "\u202a\u202b\u202c\u202d\u202e"  # bidi embeddings / overrides
+    "\u2066\u2067\u2068\u2069"  # bidi isolates
+    "\ufeff"  # zero-width no-break space (BOM)
+)
 
 
 class PageText(NamedTuple):
