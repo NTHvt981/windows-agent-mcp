@@ -10,11 +10,13 @@ Command composition and tokenisation are covered in test_composition.py.
 from __future__ import annotations
 
 import base64
+from pathlib import Path
 
 import pytest
 
 from windows_agent_mcp.allowed_command import (
     extract_command_name,
+    find_cmdlet_destinations,
     is_command_allowed,
 )
 from windows_agent_mcp.tools.run_powershell import (
@@ -272,3 +274,49 @@ def test_looks_like_base64_payload_needs_single_token() -> None:
 
     assert looks_like_base64_payload(payload) is True
     assert looks_like_base64_payload(f"python -c {payload}") is False
+
+
+# ============================================================
+# find_cmdlet_destinations
+# ============================================================
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # Not file-creation cmdlets: nothing to confine.
+        ("Get-ChildItem", None),
+        ("git status", None),
+        ("Get-Content C:\\project\\README.md", None),
+        # New-Item: -Path or the first positional is the write target.
+        ("New-Item foo.txt", ["foo.txt"]),
+        ("New-Item -ItemType File -Path foo.txt", ["foo.txt"]),
+        ('New-Item -Path "C:\\t\\x.txt" -ItemType File', ["C:\\t\\x.txt"]),
+        ("New-Item -Path:C:\\t\\y.txt", ["C:\\t\\y.txt"]),
+        ("New-Item -Path out -Name f.txt", [str(Path("out") / "f.txt")]),
+        ("New-Item -Force -ItemType Directory fresh-dir", ["fresh-dir"]),
+        # Copy/Move: -Destination or the last positional; sources are
+        # reads and stay unconfined.
+        ("Copy-Item a.txt b.txt", ["b.txt"]),
+        ("Copy-Item -Path a.txt -Destination b.txt", ["b.txt"]),
+        ("Copy-Item C:\\sdk\\file.h .", ["."]),
+        ("Move-Item 'my file.txt' dest/", ["dest/"]),
+        ("Move-Item -LiteralPath a -Destination C:\\w\\b.txt", ["C:\\w\\b.txt"]),
+        ("Copy-Item -Recurse src dst", ["dst"]),
+        # Case-insensitive like PowerShell itself.
+        ("copy-item a b", ["b"]),
+        ("NEW-ITEM foo.txt", ["foo.txt"]),
+        # -WhatIf is a dry run: nothing is written.
+        ("New-Item -WhatIf C:\\Windows\\x.txt", None),
+        ("Copy-Item a C:\\Windows\\b -WhatIf", None),
+        # A cmdlet with no identifiable destination fails closed downstream.
+        ("New-Item", []),
+        ("Copy-Item a.txt", []),
+        ("Move-Item -Path a.txt", []),
+        # Unparsable input leaves the verdict to the allowlist check.
+        ("", None),
+        ('"New-Item foo', None),
+    ],
+)
+def test_find_cmdlet_destinations(command: str, expected: list[str] | None) -> None:
+    assert find_cmdlet_destinations(command) == expected

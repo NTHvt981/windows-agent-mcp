@@ -367,3 +367,64 @@ def test_development_environment_expands_variables(
 
     assert r"C:\Expanded\bin" in env["PATH"]
     assert "%MCP_TEST_ROOT%" not in env["PATH"]
+
+
+# ============================================================
+# Cmdlet destination confinement
+# ============================================================
+
+
+def test_cmdlet_destination_outside_roots_rejected(fake_run) -> None:
+    """The incident shape: New-Item outside every writable root must die
+    in validation, before powershell.exe ever starts."""
+
+    calls = fake_run(FakeCompleted(stdout="created\n"))
+
+    result = run_powershell(r"New-Item C:\Windows\Temp\wamcp-nope.txt")
+
+    assert_error_response(result, "WRITE_PATH_NOT_ALLOWED")
+    assert calls == []
+
+
+def test_cmdlet_copy_destination_outside_roots_rejected(fake_run) -> None:
+    calls = fake_run(FakeCompleted(stdout="copied\n"))
+
+    result = run_powershell(r"Copy-Item README.md C:\Windows\Temp\wamcp-nope.txt")
+
+    assert_error_response(result, "WRITE_PATH_NOT_ALLOWED")
+    assert calls == []
+
+
+def test_cmdlet_protected_filename_rejected(fake_run) -> None:
+    calls = fake_run(FakeCompleted(stdout="created\n"))
+
+    result = run_powershell("New-Item mcp-allowed-hosts.json")
+
+    assert_error_response(result, "PROTECTED_PATH")
+    assert calls == []
+
+
+def test_cmdlet_without_destination_rejected(fake_run) -> None:
+    """Fail closed: no identifiable write target, no execution."""
+
+    calls = fake_run(FakeCompleted(stdout="copied\n"))
+
+    result = run_powershell("Copy-Item lonely-source.txt")
+
+    assert_error_response(result, "WRITE_PATH_NOT_ALLOWED")
+    assert calls == []
+
+
+def test_cmdlet_destination_inside_roots_executes(
+    fake_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A destination inside the download root passes validation and runs."""
+
+    root = tmp_path / "dl"
+    monkeypatch.setenv("WAMCP_DOWNLOAD_ROOT", str(root))
+    calls = fake_run(FakeCompleted(stdout="created\n"))
+
+    result = run_powershell("New-Item scoped-output.txt")
+
+    assert "--- EXIT CODE: 0 ---" in result
+    assert len(calls) == 1

@@ -502,3 +502,117 @@ def find_inline_code_flag(command: str) -> str | None:
                     return f"{executable} {flag} (runs code supplied inline)"
 
     return None
+
+
+# ============================================================
+# File-creation cmdlets
+# ============================================================
+
+# Cmdlets whose destination arguments escape the cwd confinement that
+# governs execution. run_powershell used to check WHERE a command runs but
+# never WHAT it writes, so `New-Item C:\elsewhere\junk.txt` succeeded under
+# a default (download-root-only) config. find_cmdlet_destinations()
+# extracts the write targets so run_powershell can run them through the
+# same resolve_write_path() confinement as write_file/edit_file.
+FILE_WRITE_CMDLETS: frozenset[str] = frozenset({"new-item", "copy-item", "move-item"})
+
+# Switch parameters that take no value: the token after one is positional,
+# not its value. Any other -param consumes exactly one following token, so
+# values like `-ErrorAction Stop` are never mistaken for destinations.
+_VALUELESS_SWITCHES: frozenset[str] = frozenset({"force", "recurse", "passthru", "whatif", "confirm"})
+
+
+def find_cmdlet_destinations(command: str) -> list[str] | None:
+    """Destination paths a file-creation cmdlet would write, if any.
+
+    Only the WRITE side is returned: New-Item's -Path/first positional
+    (joined with -Name when given), Copy/Move's -Destination/last
+    positional. Copy/Move sources are reads, deliberately unconfined like
+    read_file. A -WhatIf dry run writes nothing and yields None like a
+    non-cmdlet.
+
+    Args:
+        command: Single PowerShell command (composition already checked).
+
+    Returns:
+        None when the command is not a file-creation cmdlet (or is a
+        -WhatIf dry run). Otherwise the destination path strings, which may
+        be EMPTY when the cmdlet carries no identifiable destination --
+        the caller must reject that fail-closed (PowerShell itself would
+        prompt and die non-interactively). Never raises: unparsable input
+        yields None, leaving the verdict to the allowlist check.
+    """
+
+    try:
+        tokens = tokenize_command(command)
+    except ValueError:
+        return None
+
+    if not tokens or tokens[0].lower() not in FILE_WRITE_CMDLETS:
+        return None
+
+    is_new_item = tokens[0].lower() == "new-item"
+
+    path_param: str | None = None
+    name_param: str | None = None
+    destination_param: str | None = None
+    positionals: list[str] = []
+
+    index = 1
+
+    while index < len(tokens):
+        token = tokens[index]
+
+        if token.startswith("-") and len(token) > 1:
+            # `-Param:value` and `-Param value` alike; a trailing lone `-`
+            # is a positional path, not a switch.
+            name, separator, inline = token[1:].partition(":")
+
+            name = name.lower()
+
+            if separator and inline:
+                value: str | None = inline
+            elif name in _VALUELESS_SWITCHES:
+                if name == "whatif":
+                    return None
+                index += 1
+                continue
+            elif index + 1 < len(tokens):
+                value = tokens[index + 1]
+                index += 1
+            else:
+                value = None
+
+            if value is not None:
+                if name in ("path", "literalpath"):
+                    path_param = value
+                elif name == "destination":
+                    destination_param = value
+                elif name == "name":
+                    name_param = value
+        else:
+            positionals.append(token)
+
+        index += 1
+
+    if is_new_item:
+        base = path_param if path_param is not None else (positionals[0] if positionals else None)
+
+        if base is None:
+            return []
+
+        if name_param is not None:
+            return [str(Path(base) / name_param)]
+
+        return [base]
+
+    if destination_param is not None:
+        return [destination_param]
+
+    # The last positional is the destination -- but only when a source
+    # precedes it. A lone positional is a source with no destination
+    # (PowerShell would prompt and die non-interactively), never a target.
+    if len(positionals) >= 2:
+        return [positionals[-1]]
+
+    return []

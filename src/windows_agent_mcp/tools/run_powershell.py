@@ -5,9 +5,11 @@ from __future__ import annotations
 import base64
 import re
 import subprocess
+from pathlib import Path
 
 from ..allowed_command import (
     ALLOWED_COMMANDS,
+    find_cmdlet_destinations,
     find_command_composition,
     find_inline_code_flag,
     is_command_allowed,
@@ -15,7 +17,13 @@ from ..allowed_command import (
 from ..error import mcp_error
 from ..log import log
 from ..process import get_windows_development_environment
-from ..utils import POWERSHELL_TIMEOUT_SECONDS, resolve_working_directory
+from ..utils import (
+    POWERSHELL_TIMEOUT_SECONDS,
+    PROJECT_ROOTS_ENV_VAR,
+    ProtectedPathError,
+    resolve_write_path,
+    resolve_working_directory,
+)
 
 # PowerShell syntax patterns that we refuse completely.
 #
@@ -220,7 +228,9 @@ def run_powershell(
         not what that program then does: an allowlisted interpreter given a
         script file (`python build.py`) runs whatever that file contains, and
         `npx`/`pip` fetch and execute third-party packages. For untrusted
-        input, isolate at the OS level.
+        input, isolate at the OS level. The one exception is destination
+        confinement: New/Copy/Move-Item targets are validated against the
+        writable roots, like write_file/edit_file.
 
     Args:
         command: PowerShell command to execute. Must be in the allowlist.
@@ -276,6 +286,64 @@ def run_powershell(
                 "if the command needs to run there.",
             ],
         )
+
+    # File-creation cmdlets name their destination on the command line, and
+    # that destination escapes cwd confinement: the command may run inside
+    # an approved directory while writing anywhere. Run the write targets
+    # through the same resolve_write_path() confinement as
+    # write_file/edit_file. Relative destinations resolve against the
+    # validated working directory above, matching how PowerShell itself
+    # interprets them under cwd=resolved_directory.
+    destinations = find_cmdlet_destinations(command)
+
+    if destinations is not None and not destinations:
+        return mcp_error(
+            "WRITE_PATH_NOT_ALLOWED",
+            "run_powershell",
+            "File-creation cmdlet without an identifiable destination. "
+            "Name the file to create, copy, or move explicitly.",
+            recovery=[
+                "DO NOT retry the identical command.",
+                "Pass -Path (New-Item) or -Destination (Copy/Move-Item), "
+                "or give the destination positionally.",
+            ],
+        )
+
+    for destination in destinations or []:
+        candidate = Path(destination)
+
+        if not candidate.is_absolute():
+            candidate = resolved_directory / candidate
+
+        try:
+            resolve_write_path(str(candidate))
+        except ProtectedPathError as exc:
+            return mcp_error(
+                "PROTECTED_PATH",
+                "run_powershell",
+                str(exc),
+                path=destination,
+                recovery=[
+                    "DO NOT retry, and do not try another directory: the "
+                    "refusal is by filename, not by location.",
+                    "Only the operator may change this file. Say what you "
+                    "needed it for and let the user decide.",
+                ],
+            )
+        except ValueError as exc:
+            return mcp_error(
+                "WRITE_PATH_NOT_ALLOWED",
+                "run_powershell",
+                str(exc),
+                path=destination,
+                recovery=[
+                    "DO NOT retry the identical destination.",
+                    "Create, copy, or move inside a directory the operator "
+                    "has approved.",
+                    f"Ask the user to add the project directory to "
+                    f"{PROJECT_ROOTS_ENV_VAR} if it is missing.",
+                ],
+            )
 
     try:
         timeout_seconds = max(
