@@ -69,8 +69,6 @@ INCLUDED_FILES: tuple[str, ...] = (
 #   mcp-allowed-hosts.json
 #                       web hosts trusted on ONE machine. A trust decision
 #                       should be made again there, not inherited.
-#   *_claude.md         local working notes and design rationale. Not
-#                       published, and nothing tracked may depend on them.
 #   dist/               output of this script.
 
 # Cache directories pruned inside the included trees.
