@@ -70,3 +70,71 @@ def test_other_build_tools_are_left_alone() -> None:
     argv = ["cmake", "--build", "build"]
 
     assert _with_default_verbosity(list(argv)) == argv
+
+
+def test_second_build_for_the_same_directory_is_refused_while_one_runs(
+    writable_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+    captured: dict[str, str] = {}
+
+    def fake_run(argv, *, cwd, timeout_seconds):
+        nonlocal calls
+        calls += 1
+
+        if calls == 1:
+            # Re-enter while the outer build still holds the slot. This is the
+            # race the guard exists for: two tools building one obj/.
+            captured["inner"] = build_project(
+                "cmake --build build", str(writable_project)
+            )
+
+        return ProcessResult(
+            stdout="",
+            stderr="",
+            exit_code=0,
+            timed_out=False,
+            combined="",
+        )
+
+    monkeypatch.setattr(build_module, "run_process", fake_run)
+
+    outer = build_project("cmake --build build", str(writable_project))
+
+    inner = json.loads(captured["inner"])
+
+    assert inner["ok"] is False
+    assert inner["error"]["type"] == "BUILD_ALREADY_RUNNING"
+    assert inner["error"]["running_command"] == "cmake --build build"
+    assert "elapsed_ms" in inner["error"]
+    assert "BUILD SUCCEEDED" in outer
+
+
+def test_slot_is_released_after_a_timeout(
+    writable_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_run(argv, *, cwd, timeout_seconds):
+        return ProcessResult(
+            stdout="",
+            stderr="",
+            exit_code=-1,
+            timed_out=True,
+            combined="",
+            pid=99,
+            elapsed_ms=5,
+        )
+
+    monkeypatch.setattr(build_module, "run_process", fake_run)
+
+    first = json.loads(
+        build_project("cmake --build build", str(writable_project), timeout_seconds=5)
+    )
+    second = json.loads(
+        build_project("cmake --build build", str(writable_project), timeout_seconds=5)
+    )
+
+    assert first["error"]["type"] == "BUILD_TIMED_OUT"
+    # A timeout ends the process, so the slot is free again: the second call
+    # must see a timeout, not a refusal.
+    assert second["error"]["type"] == "BUILD_TIMED_OUT"
+

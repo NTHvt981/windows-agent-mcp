@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..allowed_command import BUILD_COMMANDS, tokenize_command
+from ..buildlock import BuildAlreadyRunning, build_slot
 from ..diagnostics import format_report, parse_build_output, parse_rebuild_kind
 from ..error import mcp_error
 from ..log import log
@@ -136,10 +137,28 @@ def build_project(
     timeout_seconds = max(1, min(int(timeout_seconds), 1800))
 
     try:
-        result = run_process(
-            argv,
-            cwd=resolved_directory,
-            timeout_seconds=timeout_seconds,
+        with build_slot(resolved_directory, command):
+            result = run_process(
+                argv,
+                cwd=resolved_directory,
+                timeout_seconds=timeout_seconds,
+            )
+    except BuildAlreadyRunning as exc:
+        return mcp_error(
+            "BUILD_ALREADY_RUNNING",
+            "build_project",
+            str(exc),
+            details={
+                "running_command": exc.running.command,
+                "elapsed_ms": exc.elapsed_ms,
+            },
+            recovery=[
+                "DO NOT start a second build: concurrent msbuild on the same "
+                "obj/ and lib/ causes link-lock errors (LNK1163/LNK1104) that "
+                "look like source bugs.",
+                "Wait for the running build to finish, then call again.",
+                "If it is wedged, ask the user to stop it.",
+            ],
         )
     except FileNotFoundError:
         return mcp_error(
