@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..allowed_command import BUILD_COMMANDS, tokenize_command
-from ..diagnostics import format_report, parse_build_output
+from ..diagnostics import format_report, parse_build_output, parse_rebuild_kind
 from ..error import mcp_error
 from ..log import log
 from ..process import run_process
@@ -117,6 +117,8 @@ def build_project(
             ],
         )
 
+    argv = _with_default_verbosity(argv)
+
     try:
         resolved_directory = resolve_working_directory(working_directory)
     except ValueError as exc:
@@ -166,12 +168,21 @@ def build_project(
             "BUILD_TIMED_OUT",
             "build_project",
             (
-                f"'{command}' did not finish within {timeout_seconds} "
-                f"seconds. Output so far:\n"
+                f"'{command}' did not finish within {timeout_seconds} seconds. "
+                f"The build process tree was terminated and it is safe to "
+                f"retry.\nOutput so far (tail):\n"
                 f"{result.combined[-_MAX_ERROR_EXCERPT:]}"
             ),
+            details={
+                "status": "timeout",
+                "pid": result.pid,
+                "elapsed_ms": result.elapsed_ms,
+                "timeout_seconds": timeout_seconds,
+                "killed": True,
+            },
             recovery=[
-                "Do not immediately retry the identical command.",
+                "The build process tree was terminated, so no orphaned "
+                "msbuild/cl/link is holding obj/ or lib/ locks. A retry is safe.",
                 "A cold build of a large project can legitimately exceed "
                 "this; raise timeout_seconds (max 1800).",
                 "Building a single target is much faster than a full build.",
@@ -194,4 +205,36 @@ def build_project(
         header=f"BUILD: {command}",
         exit_code=result.exit_code,
         raw_output=result.combined,
+        elapsed_ms=result.elapsed_ms,
+        rebuild=parse_rebuild_kind(result.combined),
     )
+
+
+def _with_default_verbosity(argv: list[str]) -> list[str]:
+    """Add /v:minimal /nologo to msbuild when the caller did not ask.
+
+    It changes console noise only, not what builds, and the parser throws the
+    banners away anyway -- so the saving is in the raw tail quoted on failure,
+    which is easier to read without a per-project banner. Only msbuild is
+    touched: cmake/ninja have different flags and are already quiet enough.
+    """
+
+    if Path(argv[0]).name.lower() not in {"msbuild", "msbuild.exe"}:
+        return argv
+
+    lowered = [token.lower() for token in argv[1:]]
+
+    has_verbosity = any(
+        token.startswith(("/v:", "/verbosity:")) for token in lowered
+    )
+    has_nologo = "/nologo" in lowered
+
+    result = list(argv)
+
+    if not has_verbosity:
+        result.append("/v:minimal")
+
+    if not has_nologo:
+        result.append("/nologo")
+
+    return result

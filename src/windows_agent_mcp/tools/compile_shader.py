@@ -287,6 +287,7 @@ def compile_shader(
         # failed, which sends the model looking in the wrong place.
         subject="COMPILE",
         success_line=success_line,
+        elapsed_ms=result.elapsed_ms,
     )
 
 

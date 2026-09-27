@@ -25,6 +25,7 @@ __all__: list[str] = [
     "ParsedOutput",
     "format_report",
     "parse_build_output",
+    "parse_rebuild_kind",
 ]
 
 # Maximum diagnostics reproduced in a report. Past this the model has plenty
@@ -50,6 +51,40 @@ MAX_RAW_TAIL_LINES = 25
 # its candidate filenames comfortably exceeds 500. Twenty of those is the
 # entire context window of the model this server targets.
 MAX_MESSAGE_CHARS = 500
+
+# Directory names that mark a warning as coming from code the caller does not
+# own. C4996 deprecation and LNK4099 missing-PDB warnings are the classic
+# third-party noise a C++ game produces, and a vendored path is the other clear
+# signal -- so they are labelled "likely pre-existing" rather than left looking
+# like something the model just introduced.
+_VENDORED_PATH_PARTS = frozenset(
+    {
+        "deps",
+        "external",
+        "externals",
+        "third_party",
+        "thirdparty",
+        "3rdparty",
+        "vendor",
+        "vendored",
+        "_deps",
+        "subprojects",
+    }
+)
+
+_KNOWN_BENIGN_CODES = frozenset({"C4996", "LNK4099"})
+
+# ninja's progress token, "[12/345]". Present exactly when it is compiling or
+# linking something, which is what tells an incremental build from a no-op.
+_NINJA_PROGRESS_PATTERN = re.compile(r"\[\d+/\d+\]")
+
+# MSBuild at /v:minimal prints a bare source path for each file it compiles
+# ("  renderer.cpp"), with no "->" and no .obj suffix -- the arrow appears only
+# on the link line. Without this a compile-only incremental build would look
+# like a no-op. A bare path ending in a C/C++ extension is otherwise unusual in
+# a build log, and matching it can only turn "" into "incremental", never the
+# dangerous "up-to-date".
+_SOURCE_FILE_PATTERN = re.compile(r"\S+\.(?:c|cc|cpp|cxx|m|mm)$", re.IGNORECASE)
 
 
 class Diagnostic(NamedTuple):
@@ -475,8 +510,150 @@ def parse_build_output(
     )
 
 
-def _format_one(diagnostic: Diagnostic) -> list[str]:
-    """Render one diagnostic as report lines."""
+def _pre_existing(diagnostic: Diagnostic) -> bool:
+    """Whether a warning probably predates the caller's current edit.
+
+    Deliberately a hint rather than a verdict: C4996 (deprecation) and
+    LNK4099 (missing PDB) are the classic third-party noise in a C++ game,
+    and a vendored path is the other signal, but the server cannot know a
+    project's directory layout for certain. Applied to warnings only -- an
+    error in a vendored header is still something to look at.
+    """
+
+    if diagnostic.code in _KNOWN_BENIGN_CODES:
+        return True
+
+    if not diagnostic.file:
+        return False
+
+    parts = diagnostic.file.lower().replace("\\", "/").split("/")
+
+    return any(part in _VENDORED_PATH_PARTS for part in parts)
+
+
+def _warning_histogram(warnings: tuple[Diagnostic, ...]) -> str:
+    """Summarise warnings as one line, e.g. "C4996 x7 (deps) | LNK4099 x2".
+
+    Grouped by code so a build with two hundred warnings becomes a handful of
+    counts instead of two hundred lines, in the same spirit as the error
+    deduplication. The directory is the top path component of the group's most
+    common file, which is enough to tell "deps/" from "src/" without spending
+    a full path on it.
+    """
+
+    if not warnings:
+        return ""
+
+    counts: dict[str, int] = {}
+    directories: dict[str, dict[str, int]] = {}
+    order: list[str] = []
+
+    for diagnostic in warnings:
+        # clang and CMake emit no code; without the message fallback a whole
+        # group would collapse under an empty key.
+        key = diagnostic.code or diagnostic.message
+
+        if key not in counts:
+            counts[key] = 0
+            directories[key] = {}
+            order.append(key)
+
+        counts[key] += diagnostic.occurrences
+
+        if diagnostic.file:
+            top = diagnostic.file.lower().replace("\\", "/").split("/")[0]
+
+            if top:
+                directories[key][top] = (
+                    directories[key].get(top, 0) + diagnostic.occurrences
+                )
+
+    parts: list[str] = []
+
+    # Highest counts first; ties keep first-seen order because sorted() is
+    # stable even with reverse=True.
+    for key in sorted(order, key=lambda item: counts[item], reverse=True):
+        label = f"{key} x{counts[key]}"
+
+        if directories[key]:
+            top = max(directories[key], key=lambda item: directories[key][item])
+            label = f"{label} ({top})"
+
+        parts.append(label)
+
+    return " | ".join(parts)
+
+
+def parse_rebuild_kind(raw_output: str) -> str:
+    """Infer what a build actually did: up-to-date, incremental or full.
+
+    Marker-based on purpose. A wrong "up-to-date" is a claim the model acts
+    on -- it may skip a build it needed -- so an unrecognised log returns ""
+    rather than a guess. The full-rebuild markers are checked before the soft
+    "Build succeeded" up-to-date signal for the same reason: a truncated log
+    that happens to contain no compile lines must not be read as a no-op.
+
+    Args:
+        raw_output: Combined stdout and stderr from the build.
+
+    Returns:
+        "up-to-date", "incremental", "full", or "" when unsure.
+    """
+
+    lowered = raw_output.lower()
+
+    has_activity = any(
+        _has_compile_activity(line) for line in raw_output.splitlines()
+    )
+
+    if "ninja: no work to do" in lowered or "everything is up to date" in lowered:
+        return "up-to-date"
+
+    if any(
+        marker in lowered
+        for marker in (
+            "rebuild all",
+            "performing full rebuild",
+            "recompiling",
+            "-t:rebuild",
+        )
+    ):
+        return "full"
+
+    if "build succeeded" in lowered and not has_activity:
+        return "up-to-date"
+
+    if has_activity:
+        return "incremental"
+
+    return ""
+
+
+def _has_compile_activity(line: str) -> bool:
+    """Whether one log line is a compiler or linker doing work."""
+
+    # MSBuild prints "Project.vcxproj -> out.exe" only when the link actually
+    # ran, and ninja/gcc-style lines use the same arrow for object output.
+    if "-> " in line:
+        return True
+
+    if "Linking" in line:
+        return True
+
+    if _NINJA_PROGRESS_PATTERN.search(line) is not None:
+        return True
+
+    return _SOURCE_FILE_PATTERN.match(line.strip()) is not None
+
+
+def _format_one(diagnostic: Diagnostic, *, is_warning: bool = False) -> list[str]:
+    """Render one diagnostic as report lines.
+
+    Args:
+        diagnostic: The diagnostic to render.
+        is_warning: True when rendering a warning, which is what allows the
+            "[likely pre-existing]" hint. Errors are never tagged.
+    """
 
     location = diagnostic.file or "(no file)"
 
@@ -503,6 +680,9 @@ def _format_one(diagnostic: Diagnostic) -> list[str]:
     if diagnostic.occurrences > 1:
         head = f"{head}  (x{diagnostic.occurrences})"
 
+    if is_warning and _pre_existing(diagnostic):
+        head = f"{head}  [likely pre-existing]"
+
     return [head] + [f"      note: {note}" for note in diagnostic.notes]
 
 
@@ -514,6 +694,8 @@ def format_report(
     raw_output: str,
     subject: str = "BUILD",
     success_line: str | None = None,
+    elapsed_ms: int | None = None,
+    rebuild: str = "",
 ) -> str:
     """Render a parsed build log as the tool's plain-text result.
 
@@ -527,13 +709,27 @@ def format_report(
             which reads as though the whole project failed.
         success_line: Replaces the default "<subject> SUCCEEDED" verdict.
             Used to name the artefact that was produced.
+        elapsed_ms: Wall-clock duration in milliseconds, shown on the header
+            line. Omitted when None so callers that do not measure (a bare
+            compile_shader invocation) keep the shorter header.
+        rebuild: "up-to-date", "incremental", "full" or "" from
+            parse_rebuild_kind. When non-empty it is printed under the header
+            so the model can tell a real build from a no-op.
 
     Returns:
         The report. Never empty, and never claims success on a non-zero exit
         it could not explain.
     """
 
-    lines = [f"{header}  (exit code {exit_code})", ""]
+    if elapsed_ms is None:
+        lines = [f"{header}  (exit code {exit_code})"]
+    else:
+        lines = [f"{header}  (exit code {exit_code}, {elapsed_ms / 1000:.1f}s)"]
+
+    if rebuild:
+        lines.append(f"rebuild: {rebuild}")
+
+    lines.append("")
 
     if parsed.errors:
         shown = parsed.errors[:MAX_ERRORS_SHOWN]
@@ -561,7 +757,7 @@ def format_report(
         )
 
         for diagnostic in shown_warnings:
-            lines.extend(_format_one(diagnostic))
+            lines.extend(_format_one(diagnostic, is_warning=True))
 
         if len(parsed.warnings) > MAX_WARNINGS_SHOWN:
             lines.append(
@@ -569,10 +765,20 @@ def format_report(
                 f"unique warnings not shown]..."
             )
 
+        histogram = _warning_histogram(parsed.warnings)
+
+        if histogram:
+            lines.append(f"WARNING SUMMARY: {histogram}")
+
         lines.append("")
 
     if exit_code == 0 and not parsed.errors:
-        lines.append(success_line or f"{subject} SUCCEEDED")
+        verdict = success_line or f"{subject} SUCCEEDED"
+
+        lines.append(
+            f"{verdict} ({parsed.total_errors} errors, "
+            f"{parsed.total_warnings} warnings)"
+        )
 
         if parsed.warnings:
             lines.append("Warnings above are not fatal.")
