@@ -21,8 +21,8 @@ from ..utils import (
     POWERSHELL_TIMEOUT_SECONDS,
     PROJECT_ROOTS_ENV_VAR,
     ProtectedPathError,
-    resolve_write_path,
     resolve_working_directory,
+    resolve_write_path,
 )
 
 # PowerShell syntax patterns that we refuse completely.
