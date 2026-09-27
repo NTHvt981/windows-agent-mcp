@@ -484,7 +484,13 @@ Run a build and return parsed diagnostics instead of a raw log.
 - `timeout_seconds` (integer, optional): 1–1800. Defaults to 600
 
 **Returns:** Unique errors first with file, line and code, each carrying a
-repeat count; then warnings; then a verdict.
+repeat count; then warnings; then a verdict. The verdict line carries elapsed
+time and counts (`BUILD SUCCEEDED (0 errors, 7 warnings)`), warnings are
+summarised per code (`WARNING SUMMARY: C4996 x7 (deps)`), and a warning from a
+vendored path (`deps/`, `third_party/`, …) or a known-benign code (`C4996`,
+`LNK4099`) is tagged `[likely pre-existing]`. A `rebuild:` line says
+`up-to-date`, `incremental` or `full` when the log makes it unambiguous, and is
+omitted when it does not — a wrong `up-to-date` is a claim the model acts on.
 
 **Understands:** MSVC (`C####`, `LNK####`), clang, gcc, CMake configure
 errors, ninja, glslc, glslangValidator, dxc and fxc.
@@ -492,11 +498,32 @@ errors, ninja, glslc, glslangValidator, dxc and fxc.
 **Only build drivers may run:** cmake, ninja, msbuild, ctest, premake5,
 dotnet, cargo, clang, gcc, cl, python. The command goes through the same
 policy as `run_powershell` (one command, no pipelines or redirection outside
-quotes) and is then executed as argv with **no shell**.
+quotes) and is then executed as argv with **no shell**. An `msbuild` command
+that sets no verbosity gets `/v:minimal /nologo` appended; that changes console
+noise, not what builds.
+
+**One build per directory.** A second `build_project` for a working directory
+that already has one running is refused with `BUILD_ALREADY_RUNNING` (naming
+the running command) rather than queued, because concurrent `msbuild` on the
+same `obj/` and `libs` produces `LNK1163`/`LNK1104` lock errors that read like
+source bugs. Only builds started by this server process are detected; a build
+you started yourself is not.
+
+**On timeout the process tree is killed**, not just the direct child — on
+Windows the latter leaves `msbuild`'s `cl`/`link` grandchildren holding locks.
+The result is a structured `BUILD_TIMED_OUT` carrying `status`, `pid`,
+`elapsed_ms`, `timeout_seconds` and `killed`, plus the tail of the output
+captured so far; a retry is then safe.
+
+**The full output is retained** to
+`<download_root>/build-logs/<utc>-<dirhash>-<ns>.log` whenever the summary is
+truncated or the build times out, and its path is reported as `full_log` (in
+the success report and in the timeout error). Page it with `read_file`. An
+ordinary small successful build writes no file.
 
 **Errors:** `INVALID_COMMAND`, `COMMAND_NOT_ALLOWED`, `NOT_A_BUILD_COMMAND`,
-`WORKING_DIRECTORY_NOT_ALLOWED`, `BUILD_TOOL_NOT_FOUND`, `BUILD_START_FAILED`,
-`BUILD_TIMED_OUT`
+`WORKING_DIRECTORY_NOT_ALLOWED`, `BUILD_ALREADY_RUNNING`, `BUILD_TOOL_NOT_FOUND`,
+`BUILD_START_FAILED`, `BUILD_TIMED_OUT`
 
 Why parse at all: a C++ project emits hundreds of warnings, one template error
 can run fifty lines, and MSVC repeats a bad header's error once per

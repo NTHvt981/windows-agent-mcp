@@ -76,7 +76,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   by reading: the name appears under `build`, and `build` is absent from
   `active_tool_groups`.
 
+- `build_project` timeout results are now structured. A timeout returns JSON
+  carrying `status: "timeout"`, `pid`, `elapsed_ms`, `timeout_seconds` and
+  `killed: true`, plus the tail of the output captured so far.
+
+  Two calls in the feedback returned a bare timeout while `msbuild` kept
+  running: the caller could not tell "build failed" from "build is slow" from
+  "build succeeded after I stopped listening", and the output it lost was the
+  first compile error. An explicitly larger `timeout_seconds` made the same
+  build return exit 0.
+
+- `build_project` refuses a second build for a working directory that already
+  has one running, with `BUILD_ALREADY_RUNNING` naming the running command.
+  Concurrent `msbuild` on the same `obj/` and `libs` does not fail cleanly — it
+  produces `LNK1163`/`LNK1104` lock contention that reads like a source error,
+  and the model then edits correct code. Refused rather than queued, because
+  queueing an MCP call for minutes with no feedback is its own failure. Only
+  builds this server process started are detected.
+
+- `build_project` retains the full, untruncated output to
+  `<download_root>/build-logs/<utc>-<dirhash>-<ns>.log` when the summary would
+  be truncated or the build timed out, and reports the path as `full_log` (and
+  `Full log:` in the timeout prose). The truncated summary is then a pointer
+  rather than a dead end. Small successful builds write no file.
+
+- Warning triage in the build report: a per-code `WARNING SUMMARY` histogram
+  (`C4996 x7 (deps)`), a `[likely pre-existing]` tag for warnings from vendored
+  paths (`deps/`, `third_party/`, …) or known-benign codes (`C4996`, `LNK4099`),
+  and a `rebuild:` line (`up-to-date`/`incremental`/`full`) when the log makes
+  it unambiguous. The vendored/benign hint is what keeps an agent from chasing
+  the third-party `C4996` noise the feedback reported in `deps/raygui`.
+
 ### Changed
+
+- `build_project` appends `/v:minimal /nologo` to `msbuild` commands that set
+  no verbosity of their own. The feedback passed `/v:minimal` by hand on every
+  call; it changes console noise only, not what builds.
+
+- Build reports now state elapsed time and counts. The header carries
+  `(exit code 0, 12.3s)` and the verdict reads
+  `BUILD SUCCEEDED (0 errors, 7 warnings)`, so a two-second incremental build is
+  distinguishable from a ten-minute cold link without guessing.
+
+- Oversized process output now keeps both ends — the first lines and the last —
+  with an omission marker between them, instead of the head only. A build's
+  actionable content sits at both ends, and for a timeout the tail is the whole
+  point.
 
 - A truncated `search_files` result now states that the list is **incomplete**
   and that its lines must not be counted to produce a total. The previous
@@ -102,6 +147,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
   Found by driving a live model, not by the suite: the tool call was correct and
   only the answer was wrong, so nothing here was failing.
+
+- A timed-out `build_project` left the build running. On Windows
+  `subprocess.run` calls `process.kill()`, which terminates only the direct
+  child; `msbuild`'s `cl.exe`/`link.exe` grandchildren survived and kept writing
+  `obj/` and `libs`, so a retry raced them and failed with lock errors presented
+  as source bugs. The process tree is now killed via `taskkill /F /T` before the
+  output drain, which is what makes the documented manual fix —
+  `Stop-Process -Name msbuild,cl,link -Force` — unnecessary.
 
 ## [1.0.0] - 2026-08-28
 
