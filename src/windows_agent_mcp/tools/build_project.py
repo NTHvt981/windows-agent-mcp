@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..allowed_command import BUILD_COMMANDS, tokenize_command
@@ -10,7 +14,11 @@ from ..diagnostics import format_report, parse_build_output, parse_rebuild_kind
 from ..error import mcp_error
 from ..log import log
 from ..process import run_process
-from ..utils import BUILD_TIMEOUT_SECONDS, resolve_working_directory
+from ..utils import (
+    BUILD_TIMEOUT_SECONDS,
+    get_download_root,
+    resolve_working_directory,
+)
 from .run_powershell import validate_powershell_command
 
 __all__: list[str] = ["build_project"]
@@ -136,12 +144,18 @@ def build_project(
 
     timeout_seconds = max(1, min(int(timeout_seconds), 1800))
 
+    # Best-effort: a None here means retention is unavailable (download root
+    # unwritable), which must not stop the build. run_process treats None as
+    # "do not retain".
+    log_path = _build_log_path(resolved_directory)
+
     try:
         with build_slot(resolved_directory, command):
             result = run_process(
                 argv,
                 cwd=resolved_directory,
                 timeout_seconds=timeout_seconds,
+                log_path=log_path,
             )
     except BuildAlreadyRunning as exc:
         return mcp_error(
@@ -183,22 +197,33 @@ def build_project(
         )
 
     if result.timed_out:
+        details = {
+            "status": "timeout",
+            "pid": result.pid,
+            "elapsed_ms": result.elapsed_ms,
+            "timeout_seconds": timeout_seconds,
+            "killed": True,
+        }
+
+        message = (
+            f"'{command}' did not finish within {timeout_seconds} seconds. "
+            f"The build process tree was terminated and it is safe to "
+            f"retry.\nOutput so far (tail):\n"
+            f"{result.combined[-_MAX_ERROR_EXCERPT:]}"
+        )
+
+        # Name the retained log in the prose as well as the details, because a
+        # caller that only prints the message would otherwise never learn the
+        # full output is on disk.
+        if result.log_path is not None:
+            details["full_log"] = str(result.log_path)
+            message = f"{message}\nFull log: {result.log_path}"
+
         return mcp_error(
             "BUILD_TIMED_OUT",
             "build_project",
-            (
-                f"'{command}' did not finish within {timeout_seconds} seconds. "
-                f"The build process tree was terminated and it is safe to "
-                f"retry.\nOutput so far (tail):\n"
-                f"{result.combined[-_MAX_ERROR_EXCERPT:]}"
-            ),
-            details={
-                "status": "timeout",
-                "pid": result.pid,
-                "elapsed_ms": result.elapsed_ms,
-                "timeout_seconds": timeout_seconds,
-                "killed": True,
-            },
+            message,
+            details=details,
             recovery=[
                 "The build process tree was terminated, so no orphaned "
                 "msbuild/cl/link is holding obj/ or lib/ locks. A retry is safe.",
@@ -226,7 +251,34 @@ def build_project(
         raw_output=result.combined,
         elapsed_ms=result.elapsed_ms,
         rebuild=parse_rebuild_kind(result.combined),
+        full_log=result.log_path,
     )
+
+
+def _build_log_path(working_directory: Path) -> Path | None:
+    """Choose where a build's full output is retained, or None if unavailable.
+
+    The file lives under the download root rather than the project tree, so a
+    build never leaves an artefact the caller's repository would track. The
+    name carries the directory's hash so a log can be attributed to a project
+    at a glance, and a nanosecond stamp so two builds in the same second do
+    not clobber each other's log.
+    """
+
+    try:
+        root = get_download_root()
+    except OSError as exc:
+        # Retention is a convenience; a build must still run without it.
+        log.warning("build log retention unavailable: %s", exc)
+        return None
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    digest = hashlib.sha1(
+        os.path.normcase(str(working_directory)).encode("utf-8")
+    ).hexdigest()[:8]
+    unique = time.time_ns()
+
+    return root / "build-logs" / f"{stamp}-{digest}-{unique}.log"
 
 
 def _with_default_verbosity(argv: list[str]) -> list[str]:

@@ -696,6 +696,7 @@ def format_report(
     success_line: str | None = None,
     elapsed_ms: int | None = None,
     rebuild: str = "",
+    full_log: Path | None = None,
 ) -> str:
     """Render a parsed build log as the tool's plain-text result.
 
@@ -715,6 +716,9 @@ def format_report(
         rebuild: "up-to-date", "incremental", "full" or "" from
             parse_rebuild_kind. When non-empty it is printed under the header
             so the model can tell a real build from a no-op.
+        full_log: Path to the retained full output, printed under the header.
+            Set when the report is a truncated summary, so the untruncated log
+            stays reachable instead of the summary becoming a dead end.
 
     Returns:
         The report. Never empty, and never claims success on a non-zero exit
@@ -728,6 +732,9 @@ def format_report(
 
     if rebuild:
         lines.append(f"rebuild: {rebuild}")
+
+    if full_log is not None:
+        lines.append(f"full log: {full_log}")
 
     lines.append("")
 

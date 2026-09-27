@@ -111,3 +111,79 @@ def test_timeout_kills_the_tree_and_reports_pid_and_elapsed(
     assert taskkill_calls[0][0] == ["taskkill", "/F", "/T", "/PID", "4242"]
     assert fake_process.kill_called is True
     assert "compiling a.cpp" in result.combined
+
+
+def test_over_cap_output_writes_the_full_log(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The log holds the full text, so a truncated summary is not a dead end."""
+
+    payload = "FIRST LINE\n" + ("x" * (200 * 1024)) + "\nLAST LINE"
+    log_path = tmp_path / "build.log"
+
+    monkeypatch.setattr(
+        process_module.subprocess,
+        "Popen",
+        lambda *args, **kwargs: FakeProcess(stdout=payload),
+    )
+
+    result = run_process(
+        ["ninja"], cwd=Path.cwd(), timeout_seconds=5, log_path=log_path
+    )
+
+    assert result.log_path == log_path
+
+    text = log_path.read_text(encoding="utf-8")
+
+    assert "FIRST LINE" in text
+    assert "LAST LINE" in text
+    # Unlike result.combined, the file is the raw output: no omission marker.
+    assert "truncated" not in text
+    assert len(text) > len(result.combined)
+
+
+def test_small_successful_output_leaves_no_log(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An ordinary build must not litter the download root with logs."""
+
+    log_path = tmp_path / "build.log"
+
+    monkeypatch.setattr(
+        process_module.subprocess,
+        "Popen",
+        lambda *args, **kwargs: FakeProcess(stdout="ok\n"),
+    )
+
+    result = run_process(
+        ["ninja"], cwd=Path.cwd(), timeout_seconds=5, log_path=log_path
+    )
+
+    assert result.log_path is None
+    assert not log_path.exists()
+
+
+def test_timeout_writes_the_log_even_when_output_is_small(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A killed build's output is retained regardless of its size."""
+
+    fake_process = TimeoutProcess(pid=4242, stdout="compiling a.cpp\n")
+    log_path = tmp_path / "build.log"
+
+    monkeypatch.setattr(
+        process_module.subprocess, "Popen", lambda *args, **kwargs: fake_process
+    )
+
+    def fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(process_module.subprocess, "run", fake_run)
+
+    result = run_process(
+        ["msbuild"], cwd=Path.cwd(), timeout_seconds=5, log_path=log_path
+    )
+
+    assert result.timed_out is True
+    assert result.log_path == log_path
+    assert log_path.read_text(encoding="utf-8").strip() == "compiling a.cpp"

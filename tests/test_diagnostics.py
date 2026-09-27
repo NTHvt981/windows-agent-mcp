@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from windows_agent_mcp.diagnostics import (
     Diagnostic,
     _warning_histogram,
@@ -120,3 +122,18 @@ def test_rebuild_kind_reads_a_bare_msbuild_success_as_up_to_date() -> None:
 
 def test_rebuild_kind_detects_full_rebuild() -> None:
     assert parse_rebuild_kind("Rebuild All started...") == "full"
+
+
+def test_report_names_the_full_log_when_retained() -> None:
+    """The truncated report must tell the caller where the rest lives."""
+
+    report = format_report(
+        parse_build_output(""),
+        header="BUILD: ninja",
+        exit_code=0,
+        raw_output="",
+        full_log=Path("C:/tmp/x.log"),
+    )
+
+    assert "full log:" in report
+    assert "x.log" in report

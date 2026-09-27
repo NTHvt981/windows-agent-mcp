@@ -8,6 +8,7 @@ installed on the machine running the suite.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -22,7 +23,7 @@ from windows_agent_mcp.tools.build_project import (
 def test_timeout_returns_structured_status_with_pid(
     writable_project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def fake_run(argv, *, cwd, timeout_seconds):
+    def fake_run(argv, *, cwd, timeout_seconds, log_path=None):
         return ProcessResult(
             stdout="compiling a.cpp\n",
             stderr="",
@@ -78,7 +79,7 @@ def test_second_build_for_the_same_directory_is_refused_while_one_runs(
     calls = 0
     captured: dict[str, str] = {}
 
-    def fake_run(argv, *, cwd, timeout_seconds):
+    def fake_run(argv, *, cwd, timeout_seconds, log_path=None):
         nonlocal calls
         calls += 1
 
@@ -113,7 +114,7 @@ def test_second_build_for_the_same_directory_is_refused_while_one_runs(
 def test_slot_is_released_after_a_timeout(
     writable_project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def fake_run(argv, *, cwd, timeout_seconds):
+    def fake_run(argv, *, cwd, timeout_seconds, log_path=None):
         return ProcessResult(
             stdout="",
             stderr="",
@@ -137,4 +138,55 @@ def test_slot_is_released_after_a_timeout(
     # A timeout ends the process, so the slot is free again: the second call
     # must see a timeout, not a refusal.
     assert second["error"]["type"] == "BUILD_TIMED_OUT"
+
+
+def test_full_log_path_is_named_in_the_success_report(
+    writable_project, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A truncated diagnostic summary must still point at the raw log."""
+
+    retained = tmp_path / "build.log"
+
+    def fake_run(argv, *, cwd, timeout_seconds, log_path=None):
+        return ProcessResult(
+            stdout="",
+            stderr="",
+            exit_code=0,
+            timed_out=False,
+            combined="",
+            log_path=retained,
+        )
+
+    monkeypatch.setattr(build_module, "run_process", fake_run)
+
+    report = build_project("cmake --build build", str(writable_project))
+
+    assert "full log:" in report
+    assert str(retained) in report
+
+
+def test_full_log_path_is_carried_in_the_timeout_details(
+    writable_project, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    retained = tmp_path / "build.log"
+
+    def fake_run(argv, *, cwd, timeout_seconds, log_path=None):
+        return ProcessResult(
+            stdout="",
+            stderr="",
+            exit_code=-1,
+            timed_out=True,
+            combined="",
+            pid=7,
+            elapsed_ms=3,
+            log_path=retained,
+        )
+
+    monkeypatch.setattr(build_module, "run_process", fake_run)
+
+    payload = json.loads(
+        build_project("cmake --build build", str(writable_project))
+    )
+
+    assert payload["error"]["full_log"] == str(retained)
 

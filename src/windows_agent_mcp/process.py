@@ -134,6 +134,10 @@ class ProcessResult(NamedTuple):
         elapsed_ms: Wall-clock duration of the run in milliseconds, measured
             around communicate(). Reported so a caller can tell a build that
             finished in two seconds from one that ran for ten minutes.
+        log_path: Path to the full output when one was retained, else None.
+            Set only when the summary is truncated or the run timed out, so a
+            caller can page the untruncated log instead of being stuck with
+            the excerpt.
     """
 
     stdout: str
@@ -143,6 +147,7 @@ class ProcessResult(NamedTuple):
     combined: str
     pid: int | None = None
     elapsed_ms: int = 0
+    log_path: Path | None = None
 
 
 def _truncate(text: str, label: str) -> str:
@@ -168,6 +173,22 @@ def _truncate(text: str, label: str) -> str:
         + f"\n...[{label} truncated, {omitted} chars omitted]...\n"
         + text[-MAX_PROCESS_OUTPUT_TAIL_CHARS:]
     )
+
+
+def _write_log(log_path: Path, text: str) -> Path | None:
+    """Write the full output, returning the path or None on failure.
+
+    Log retention must never fail the build it is describing, so an
+    OSError here is logged and swallowed.
+    """
+
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(text, encoding="utf-8", errors="replace")
+        return log_path
+    except OSError as exc:
+        log.warning("could not write build log %s: %s", log_path, exc)
+        return None
 
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
@@ -201,6 +222,7 @@ def run_process(
     *,
     cwd: Path,
     timeout_seconds: int,
+    log_path: Path | None = None,
 ) -> ProcessResult:
     """Run a program directly, capturing bounded output.
 
@@ -212,6 +234,10 @@ def run_process(
         argv: Program and arguments.
         cwd: Working directory, already validated by the caller.
         timeout_seconds: Wall-clock limit.
+        log_path: Destination for the full output when it must be retained.
+            Written only when the summary is truncated or the run timed out;
+            an ordinary successful run leaves no file. Failures to write are
+            logged and ignored, never raised.
 
     Returns:
         The captured result. A timeout is reported, not raised, so the caller
@@ -267,6 +293,8 @@ def run_process(
     stdout = stdout or ""
     stderr = stderr or ""
 
+    full_combined = stdout + "\n" + stderr
+
     # A timed-out process has no meaningful exit status, so it is reported as
     # -1 rather than whatever TerminateProcess happened to leave behind.
     exit_code = -1
@@ -274,12 +302,24 @@ def run_process(
     if not timed_out and process.returncode is not None:
         exit_code = process.returncode
 
+    # Retain the full output only when the summary is actually truncated or the
+    # build was killed, so an ordinary successful build leaves no file. The
+    # untruncated text is written rather than `combined`, because the whole
+    # point of the log is that the excerpt is hiding something.
+    kept_log: Path | None = None
+
+    if log_path is not None and (
+        timed_out or len(full_combined) > MAX_PROCESS_OUTPUT_CHARS
+    ):
+        kept_log = _write_log(log_path, full_combined)
+
     return ProcessResult(
         stdout=_truncate(stdout, "stdout"),
         stderr=_truncate(stderr, "stderr"),
         exit_code=exit_code,
         timed_out=timed_out,
-        combined=_truncate(stdout + "\n" + stderr, "output"),
+        combined=_truncate(full_combined, "output"),
         pid=process.pid,
         elapsed_ms=elapsed_ms,
+        log_path=kept_log,
     )
