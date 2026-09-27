@@ -1,38 +1,4 @@
-"""Hosts the operator has approved for fetch_web_page, without a restart.
-
-The problem this solves. `fetch_web_page` reads from a fixed list of reference
-documentation hosts (`utils.ALLOWED_DOC_HOSTS`), and everything else needs
-research mode -- which is all-or-nothing and requires restarting the server.
-So when a model hit a legitimate but unlisted host, the denial told it to "ask
-the user", and the user's only available answer was "set
-WAMCP_WEB_RESEARCH=1 and restart", i.e. open the network posture completely.
-There was no way to say "yes, that one host".
-
-This module is that way. Hosts named here are added to ALLOWED_DOC_HOSTS for
-every fetch, and the file is re-read on every fetch -- not cached -- so a
-grant takes effect on the model's *next call* with no restart.
-
-Three properties that are load-bearing rather than incidental:
-
-* **The model cannot grant itself a host.** `utils.resolve_write_path` refuses
-  to write any file named `mcp-allowed-hosts.json`, anywhere. That is
-  deliberately broader than "the file we are currently reading": the search
-  order below prefers the current directory, so a model able to *create* a
-  grants file where none existed would grant itself the internet. Refusing by
-  filename closes that, including for files that do not exist yet.
-* **A grant is read-only.** Granted hosts join ALLOWED_DOC_HOSTS (fetched into
-  context), never ALLOWED_NETWORK_HOSTS (bytes written to disk). Approving a
-  host to read is a much smaller decision than approving it to deliver files.
-* **No wildcards.** `*.example.com` reads like a narrow grant and is not: one
-  forgotten subdomain CNAME, or any host that lets strangers publish under a
-  subdomain, turns it into an any-host grant for that zone. Entries are exact
-  hostnames.
-
-What a grant does cost. An approved host can be fetched with an arbitrary
-path, so if that host is attacker-controlled it reopens the exfiltration
-channel research mode opens -- for that host only. "I trust this site" is the
-decision being made, not "just this once".
-"""
+"""Hosts the operator has approved for fetch_web_page, without a restart."""
 
 from __future__ import annotations
 
@@ -70,82 +36,36 @@ __all__: list[str] = [
 
 DEFAULT_GRANTS_FILENAME = "mcp-allowed-hosts.json"
 
-# Points at a grants file elsewhere, for a client whose working directory is
-# not the repository. Mirrors WAMCP_PROFILES_FILE.
 GRANTS_FILE_ENV_VAR = "WAMCP_ALLOWED_HOSTS_FILE"
 
-# Hosts as a plain list, for the case where a file is awkward: some MCP clients
-# expose an `env` block and nothing else, and a profile can carry a per-profile
-# value. Merged with the file rather than overriding it.
 EXTRA_HOSTS_ENV_VAR = "WAMCP_EXTRA_DOC_HOSTS"
 
-# Opt-in for writing an approved host back to the grants file.
-#
-# Off by default, and that is a security decision rather than caution. The MCP
-# spec permits a client to answer an elicitation itself -- "If the client is an
-# agent, it might decide how to handle the elicitation" -- so an approval is
-# not proof a human saw it. A session-scoped grant that an agent auto-approved
-# dies with the process; a persisted one would be permanent. Persisting
-# therefore requires the operator to say, once, that their client really does
-# put the question to a person.
+# Approvals may come from an agent, not a human.
 PERSIST_ENV_VAR = "WAMCP_HOST_GRANT_PERSIST"
 
 _TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
 
-# Bumped only for a breaking format change. An unrecognised version is an error
-# rather than a best-effort read.
 SCHEMA_VERSION = 1
 
-# Separators accepted in WAMCP_EXTRA_DOC_HOSTS. Comma is the natural one;
-# semicolon matches WAMCP_PROJECT_ROOTS, and whitespace costs nothing to
-# accept. cmd.exe splits batch arguments on commas AND semicolons, so a
-# launcher flag will arrive pre-split -- accepting both means the rejoined
-# value parses either way.
+# cmd.exe pre-splits on commas and semicolons.
 _HOST_SEPARATORS = ",;"
 
-# Characters that make a "hostname" something else. Checked explicitly so the
-# error can name the problem rather than saying "invalid".
 _WILDCARD_CHARACTERS = "*?"
 
 
 class HostGrant(NamedTuple):
-    """One approved host.
-
-    Attributes:
-        host: Exact lowercase hostname.
-        enable: False parks the grant: it stays in the file, with its note, but
-            is not applied. The point of a file over an environment variable is
-            that a revoked host can be revoked without losing the record of
-            why it was ever added.
-        note: Free text. This is where "needed for the RTS pathfinding
-            articles" lives.
-    """
+    """One approved host."""
 
     host: str
     enable: bool
     note: str
 
 
-# Hosts approved for this process only, via an elicitation the operator
-# answered. Not written anywhere: see PERSIST_ENV_VAR.
 _session_grants: set[str] = set()
 
 
 def find_grants_file() -> Path:
-    """Locate the grants file.
-
-    Order, most explicit first:
-
-    1. WAMCP_ALLOWED_HOSTS_FILE.
-    2. `mcp-allowed-hosts.json` in the current directory. The launcher pushd's
-       to the repository root, so this is the normal case.
-    3. The repository root inferred from this file's location, but only for an
-       editable install -- confirmed by pyproject.toml being there. In a
-       site-packages install that path is meaningless.
-
-    Returns:
-        The path to use. May not exist; callers handle that.
-    """
+    """Locate the grants file."""
 
     configured = os.environ.get(GRANTS_FILE_ENV_VAR, "").strip()
 
@@ -157,7 +77,6 @@ def find_grants_file() -> Path:
     if in_cwd.is_file():
         return in_cwd
 
-    # src/windows_agent_mcp/hostgrants.py -> repository root
     repo_root = Path(__file__).resolve().parents[2]
 
     if (repo_root / "pyproject.toml").is_file():
@@ -167,23 +86,9 @@ def find_grants_file() -> Path:
 
 
 def normalise_host(raw: str) -> str:
-    """Turn one operator-written entry into a hostname, or explain why not.
+    """Turn one operator-written entry into a hostname, or explain why not."""
 
-    Strict on purpose. The tempting alternative is to accept a pasted URL and
-    quietly use its host, but silent coercion in a trust file is how an
-    operator ends up approving something other than what they read. Instead the
-    error names the hostname they probably meant, so the fix is a copy-paste
-    rather than a puzzle.
-
-    Args:
-        raw: One entry, as written.
-
-    Returns:
-        The lowercase hostname.
-
-    Raises:
-        ValueError: If the entry is not a bare hostname.
-    """
+    # Strict: silent coercion would approve more than read.
 
     entry = raw.strip()
 
@@ -209,8 +114,7 @@ def normalise_host(raw: str) -> str:
     if "@" in entry:
         raise ValueError(f"'{entry}' contains credentials. Use the hostname only.")
 
-    # A hostname has no port: the fetcher only ever connects on 443, so a port
-    # here would be silently ignored rather than honoured.
+    # Only 443 is ever fetched; a port would be silently ignored.
     if ":" in entry:
         raise ValueError(
             f"'{entry}' contains a port. Only HTTPS on port 443 is fetched, "
@@ -222,9 +126,6 @@ def normalise_host(raw: str) -> str:
     if not host:
         raise ValueError(f"'{entry}' is not a hostname")
 
-    # Deliberately loose beyond this point: an allowlist entry that matches
-    # nothing is inert, so the checks above (which catch entries that mean
-    # something *broader* than they look) are the ones that matter.
     if " " in host or "\t" in host:
         raise ValueError(f"'{entry}' contains whitespace. One host per entry.")
 
@@ -232,16 +133,7 @@ def normalise_host(raw: str) -> str:
 
 
 def parse_host_list(raw: str | None) -> tuple[frozenset[str], list[str]]:
-    """Parse a separated host list, as used by WAMCP_EXTRA_DOC_HOSTS.
-
-    Args:
-        raw: Separated list, or None.
-
-    Returns:
-        (hosts, errors). Bad entries are dropped and reported; good ones in the
-        same list still apply, because failing an entire list over one typo
-        would silently revoke hosts the operator already relies on.
-    """
+    """Parse a separated host list, as used by WAMCP_EXTRA_DOC_HOSTS."""
 
     if not raw or not raw.strip():
         return frozenset(), []
@@ -266,27 +158,7 @@ def parse_host_list(raw: str | None) -> tuple[frozenset[str], list[str]]:
 
 
 def parse_grants(data: Any) -> tuple[dict[str, HostGrant], list[str]]:
-    """Turn parsed JSON into grants, collecting every problem found.
-
-    Pure: takes already-decoded JSON, so the whole table is testable without
-    touching the filesystem.
-
-    Accepts two entry shapes, because both are things an operator will
-    reasonably write::
-
-        {"version": 1, "hosts": ["docs.example.com"]}
-
-        {"version": 1, "hosts": [
-            {"host": "docs.example.com", "enable": true, "note": "why"}
-        ]}
-
-    Args:
-        data: Decoded contents of the grants file.
-
-    Returns:
-        (grants keyed by host, errors). Entries that failed validation are
-        omitted; the rest still load.
-    """
+    """Turn parsed JSON into grants, collecting every problem found."""
 
     errors: list[str] = []
 
@@ -355,17 +227,7 @@ def parse_grants(data: Any) -> tuple[dict[str, HostGrant], list[str]]:
 
 
 def load_grants(path: Path) -> tuple[dict[str, HostGrant], list[str]]:
-    """Read and validate a grants file.
-
-    A missing file is NOT an error: no grants is the normal, default state, and
-    a warning on every fetch would train the operator to ignore warnings.
-
-    Args:
-        path: File to read.
-
-    Returns:
-        (grants, errors).
-    """
+    """Read and validate a grants file."""
 
     try:
         text = path.read_text(encoding="utf-8")
@@ -383,30 +245,9 @@ def load_grants(path: Path) -> tuple[dict[str, HostGrant], list[str]]:
 
 
 def _load_file_hosts(path: Path) -> tuple[frozenset[str], str | None]:
-    """Load enabled hosts from the grants file. Read fresh every time.
+    """Load enabled hosts from the grants file. Read fresh every time."""
 
-    There is deliberately NO cache here, and the first attempt at one is worth
-    recording because it looked obviously correct: key the parsed result on
-    `(path, st_mtime_ns, st_size)` and reuse it while those are unchanged.
-
-    That is unsound on Windows. Despite the nanosecond field, mtime resolution
-    on NTFS here is about a millisecond, so two writes of the same length
-    within one tick produce an identical signature -- and the cache then serves
-    the OLD host set. For this file that means a revoked host still reading as
-    granted, or a fresh grant still reading as refused. A cache that can be
-    wrong about a trust decision is not worth having.
-
-    The saving it bought was negligible anyway: this runs once per fetch plus
-    once per redirect hop, against an operation that already does a DNS lookup
-    and a TLS handshake. Reading and parsing a file of a few hundred bytes does
-    not register next to that.
-
-    Args:
-        path: Grants file to read.
-
-    Returns:
-        (enabled hosts, error) -- fail closed, with the reason.
-    """
+    # No cache: NTFS mtime resolution makes it unsound.
 
     grants, errors = load_grants(path)
 
@@ -415,9 +256,6 @@ def _load_file_hosts(path: Path) -> tuple[frozenset[str], str | None]:
     error = "; ".join(errors) if errors else None
 
     if error is not None:
-        # Logged as well as returned: the model sees the returned message only
-        # when it calls get_server_info, and a malformed grants file otherwise
-        # looks exactly like a host that was never granted.
         log.warning("%s: %s", DEFAULT_GRANTS_FILENAME, error)
 
     return hosts, error
@@ -430,36 +268,18 @@ def session_grants() -> frozenset[str]:
 
 
 def grant_for_session(host: str) -> None:
-    """Approve a host for this process.
-
-    Args:
-        host: Hostname, already normalised.
-    """
+    """Approve a host for this process."""
 
     _session_grants.add(host)
 
 
 def clear_session_grants() -> None:
-    """Forget every session grant. Used by tests, and by nothing else."""
 
     _session_grants.clear()
 
 
 def granted_hosts() -> tuple[frozenset[str], str | None]:
-    """Every host the operator has approved, from all three sources.
-
-    Sources are merged rather than ranked: a host is granted if any of the
-    grants file, WAMCP_EXTRA_DOC_HOSTS, or an elicitation this session says
-    so. There is no "deny" entry to conflict with -- `"enable": false` removes
-    a host from the file's contribution, it does not veto the others -- so
-    merging cannot produce a surprising result.
-
-    Fails closed: a grants file that cannot be read or parsed contributes no
-    hosts, and the reason comes back so get_server_info can show it.
-
-    Returns:
-        (hosts, error) where error is a human-readable summary or None.
-    """
+    """Every host the operator has approved, from all three sources."""
 
     file_hosts, file_error = _load_file_hosts(find_grants_file())
 
@@ -479,24 +299,7 @@ def persist_enabled() -> bool:
 
 
 def persist_grant(host: str, *, note: str = "") -> str | None:
-    """Add a host to the grants file, creating the file if needed.
-
-    Written atomically via a temporary file in the same directory plus
-    os.replace, so an interrupted write cannot leave a truncated trust file --
-    which would fail closed, but would also silently revoke every host the
-    operator had approved.
-
-    Existing content is preserved: unknown top-level keys are kept, and an
-    entry already present is left alone rather than rewritten, so a note the
-    operator wrote by hand survives.
-
-    Args:
-        host: Hostname to add. Normalised here, so a caller may pass raw input.
-        note: Optional reason to record alongside it.
-
-    Returns:
-        None on success, or a message explaining why nothing was written.
-    """
+    """Add a host to the grants file, creating the file if needed."""
 
     try:
         host = normalise_host(host)
@@ -508,8 +311,7 @@ def persist_grant(host: str, *, note: str = "") -> str | None:
     grants, errors = load_grants(path)
 
     if errors:
-        # Refusing rather than overwriting: rewriting a file we could not
-        # understand would discard entries the operator meant to keep.
+        # Refusing beats discarding entries the operator meant to keep.
         return f"{path} has problems, so it was not modified: {errors[0]}"
 
     if host in grants and grants[host].enable:
@@ -558,8 +360,6 @@ def persist_grant(host: str, *, note: str = "") -> str | None:
     except OSError as exc:
         return f"could not write {path}: {exc}"
     except BaseException:
-        # Includes KeyboardInterrupt: a stray .tmp beside a trust file is
-        # confusing at exactly the wrong moment.
         Path(temporary).unlink(missing_ok=True)
         raise
 
@@ -567,15 +367,9 @@ def persist_grant(host: str, *, note: str = "") -> str | None:
 
 
 def scaffold() -> dict[str, Any]:
-    """Build a starter grants file.
+    """Build a starter grants file."""
 
-    Empty of real hosts on purpose. A scaffold that pre-approved a few
-    plausible sites would be granting access the operator never chose, and the
-    hosts worth having by default are already in ALLOWED_DOC_HOSTS.
-
-    Returns:
-        JSON-serialisable contents.
-    """
+    # Empty: pre-approving grants unchosen access.
 
     return {
         "version": SCHEMA_VERSION,
@@ -623,17 +417,7 @@ def _print_list(grants: dict[str, HostGrant], path: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Operator CLI for the grants file.
-
-    This is the answer to "the model asked, I said yes, now what": one command,
-    effective on the model's next call, no restart and no editor.
-
-    Args:
-        argv: Arguments, defaulting to sys.argv[1:].
-
-    Returns:
-        Process exit code.
-    """
+    """Operator CLI for the grants file."""
 
     import argparse
 
@@ -725,11 +509,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _remove(path: Path, host: str) -> str | None:
-    """Delete one host's entry from the grants file.
-
-    Returns:
-        None on success, or a message explaining why nothing changed.
-    """
+    """Delete one host's entry from the grants file."""
 
     try:
         host = normalise_host(host)

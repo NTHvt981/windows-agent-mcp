@@ -23,9 +23,6 @@ from .run_powershell import validate_powershell_command
 
 __all__: list[str] = ["build_project"]
 
-# Longest slice of raw output quoted inside an error envelope. Enough to see
-# what the tool said, short enough not to blow the context on a failure the
-# model cannot act on anyway.
 _MAX_ERROR_EXCERPT = 1500
 
 
@@ -34,37 +31,7 @@ def build_project(
     working_directory: str | None = None,
     timeout_seconds: int = BUILD_TIMEOUT_SECONDS,
 ) -> str:
-    """Run a build command and return only the diagnostics that matter.
-
-    Prefer this over run_powershell for anything that compiles. run_powershell
-    returns the raw log, which on a C++ project means hundreds of warnings and
-    the same header error repeated once per translation unit. This parses that
-    output and returns unique errors first, each with its file, line and code,
-    with repeat counts instead of repetition.
-
-    Understands MSVC (C####, LNK####), clang and gcc, CMake configure errors,
-    and ninja. If nothing parses but the build failed, the tail of the raw
-    output is shown rather than a misleading "no errors".
-
-    Only build drivers may be run: cmake, ninja, msbuild, ctest, premake5,
-    dotnet, cargo, clang, gcc, cl, python. Exactly one command per call, with
-    the same restrictions as run_powershell -- no pipelines, redirection or
-    separators outside quotes.
-
-    Args:
-        command: Build command, e.g. "cmake --build build --config Debug".
-        working_directory: Directory to build in. Must be inside the download
-            root or a root listed in WAMCP_PROJECT_ROOTS.
-        timeout_seconds: Wall-clock limit, 1 to 1800. Defaults to 600, since
-            a cold C++ build takes far longer than a shell command.
-
-    Returns:
-        A plain-text diagnostic report, or a structured JSON error.
-
-    Example:
-        >>> build_project("cmake --build build", "C:/game")
-        'BUILD: cmake --build build  (exit code 0)\\n\\nBUILD SUCCEEDED'
-    """
+    """Run a build command and return only the diagnostics that matter."""
 
     if not command or not command.strip():
         return mcp_error(
@@ -74,9 +41,6 @@ def build_project(
             recovery=["Pass a build command such as 'cmake --build build'."],
         )
 
-    # Reuse run_powershell's policy wholesale rather than reimplementing a
-    # weaker version: composition, dangerous patterns, the allowlist, inline
-    # code and encoded payloads are all checked identically.
     try:
         validate_powershell_command(command)
     except ValueError as exc:
@@ -92,15 +56,9 @@ def build_project(
             ],
         )
 
-    # tokenize_command raises only on an empty command or an unterminated
-    # quote, and validate_powershell_command above already rejects both --
-    # empty via the check at the top of this function, unterminated quotes via
-    # find_command_composition. So this handler is currently unreachable and
-    # is kept only so a future relaxation of that policy cannot turn a
-    # ValueError into a transport-level failure.
     try:
         argv = tokenize_command(command)
-    except ValueError as exc:  # pragma: no cover - unreachable, see above
+    except ValueError as exc:  # pragma: no cover - unreachable
         return mcp_error(
             "INVALID_COMMAND",
             "build_project",
@@ -144,9 +102,7 @@ def build_project(
 
     timeout_seconds = max(1, min(int(timeout_seconds), 1800))
 
-    # Best-effort: a None here means retention is unavailable (download root
-    # unwritable), which must not stop the build. run_process treats None as
-    # "do not retain".
+    # None means no retention; the build still runs.
     log_path = _build_log_path(resolved_directory)
 
     try:
@@ -212,9 +168,6 @@ def build_project(
             f"{result.combined[-_MAX_ERROR_EXCERPT:]}"
         )
 
-        # Name the retained log in the prose as well as the details, because a
-        # caller that only prints the message would otherwise never learn the
-        # full output is on disk.
         if result.log_path is not None:
             details["full_log"] = str(result.log_path)
             message = f"{message}\nFull log: {result.log_path}"
@@ -256,19 +209,11 @@ def build_project(
 
 
 def _build_log_path(working_directory: Path) -> Path | None:
-    """Choose where a build's full output is retained, or None if unavailable.
-
-    The file lives under the download root rather than the project tree, so a
-    build never leaves an artefact the caller's repository would track. The
-    name carries the directory's hash so a log can be attributed to a project
-    at a glance, and a nanosecond stamp so two builds in the same second do
-    not clobber each other's log.
-    """
+    """Choose where a build's full output is retained, or None if unavailable."""
 
     try:
         root = get_download_root()
     except OSError as exc:
-        # Retention is a convenience; a build must still run without it.
         log.warning("build log retention unavailable: %s", exc)
         return None
 
@@ -282,13 +227,7 @@ def _build_log_path(working_directory: Path) -> Path | None:
 
 
 def _with_default_verbosity(argv: list[str]) -> list[str]:
-    """Add /v:minimal /nologo to msbuild when the caller did not ask.
-
-    It changes console noise only, not what builds, and the parser throws the
-    banners away anyway -- so the saving is in the raw tail quoted on failure,
-    which is easier to read without a per-project banner. Only msbuild is
-    touched: cmake/ninja have different flags and are already quiet enough.
-    """
+    """Add /v:minimal /nologo to msbuild when the caller did not ask."""
 
     if Path(argv[0]).name.lower() not in {"msbuild", "msbuild.exe"}:
         return argv

@@ -1,5 +1,3 @@
-"""Tests for the success-triage additions to the diagnostics renderer."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,8 +18,6 @@ def warning(
     occurrences: int = 1,
     message: str = "deprecated",
 ) -> Diagnostic:
-    """Build a warning with only the fields these tests care about."""
-
     return Diagnostic(
         file=file,
         line=1,
@@ -74,8 +70,6 @@ def test_vendored_warning_is_tagged_likely_preexisting() -> None:
 
 
 def test_errors_are_never_tagged_likely_preexisting() -> None:
-    """Vendored or benign-coded, an error is still something to look at."""
-
     report = format_report(
         parse_build_output("deps/raygui/raygui.h(42): error C4996: deprecated"),
         header="BUILD: msbuild",
@@ -87,8 +81,6 @@ def test_errors_are_never_tagged_likely_preexisting() -> None:
 
 
 def test_rebuild_kind_is_empty_when_unsure() -> None:
-    """A wrong "up-to-date" is a claim the model acts on, so no guessing."""
-
     assert parse_rebuild_kind("some unrelated output\n") == ""
 
 
@@ -101,16 +93,12 @@ def test_rebuild_kind_detects_incremental_compile() -> None:
 
 
 def test_rebuild_kind_detects_msbuild_link_as_incremental() -> None:
-    """The arrow appears on the link line, which is real work, not a no-op."""
-
     log = "  MyApp.vcxproj -> C:\\out\\MyApp.exe\nBuild succeeded."
 
     assert parse_rebuild_kind(log) == "incremental"
 
 
 def test_rebuild_kind_detects_msbuild_compile_as_incremental() -> None:
-    """At /v:minimal a compiled file is a bare path with no arrow."""
-
     assert parse_rebuild_kind("  renderer.cpp\nBuild succeeded.") == "incremental"
 
 
@@ -125,8 +113,6 @@ def test_rebuild_kind_detects_full_rebuild() -> None:
 
 
 def test_report_names_the_full_log_when_retained() -> None:
-    """The truncated report must tell the caller where the rest lives."""
-
     report = format_report(
         parse_build_output(""),
         header="BUILD: ninja",

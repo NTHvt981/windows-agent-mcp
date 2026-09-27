@@ -1,5 +1,3 @@
-"""List empty directories tool for Windows Agent MCP Server."""
-
 from __future__ import annotations
 
 import os
@@ -13,25 +11,7 @@ __all__: list[str] = ["list_empty_dirs"]
 
 
 def list_empty_dirs(path: str) -> str:
-    """Find empty directories beneath a path.
-
-    A directory counts as empty when it contains no files and every
-    subdirectory it contains is itself empty. So a tree of nothing but
-    directories is reported from the top down, which is what makes the
-    result usable for cleanup.
-
-    Args:
-        path: Root directory to search.
-
-    Returns:
-        One directory path per line, deepest first, or a structured JSON
-        error on failure. Reports "no empty directories found" when there
-        are none.
-
-    Example:
-        >>> list_empty_dirs("build")
-        'build/obj\\nbuild/obj/debug'
-    """
+    """Find empty directories beneath a path."""
 
     if not path or not path.strip():
         return mcp_error(
@@ -72,10 +52,7 @@ def list_empty_dirs(path: str) -> str:
     try:
         empty: list[str] = []
 
-        # topdown=False visits children before parents, so by the time a
-        # directory is examined every child has already been classified.
-        # That is what lets rule 2 (a parent holding only empty
-        # directories) be evaluated in a single pass.
+        # topdown=False classifies children before parents.
         empty_lookup: set[str] = set()
 
         for dirpath, dirnames, filenames in os.walk(path, topdown=False):

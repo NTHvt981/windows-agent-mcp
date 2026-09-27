@@ -19,32 +19,7 @@ __all__: list[str] = ["write_file"]
 
 
 def write_file(path: str, content: str, overwrite: bool = False) -> str:
-    """Create a text file, or replace one entirely.
-
-    Refuses to overwrite an existing file unless `overwrite` is true. That
-    default is deliberate: use edit_file to change part of a file, and reserve
-    this tool for creating new ones. Rewriting a whole file to change three
-    lines is how a small model accidentally deletes the rest of it.
-
-    Writes are confined to the download root plus any directory listed in
-    WAMCP_PROJECT_ROOTS. Missing parent directories are created.
-
-    Newlines are written exactly as given, with no CRLF translation, so the
-    content lands byte-for-byte as supplied. Encoding is always UTF-8.
-
-    Args:
-        path: Destination file path.
-        content: Full text to write.
-        overwrite: Allow replacing an existing file. Defaults to false.
-
-    Returns:
-        A one-line confirmation with the path and size, or a structured JSON
-        error with recovery instructions.
-
-    Example:
-        >>> write_file("src/renderer/swapchain.h", "#pragma once\\n")
-        'WROTE: C:\\\\game\\\\src\\\\renderer\\\\swapchain.h (11 bytes, new file)'
-    """
+    """Create text file, or replace one entirely."""
 
     try:
         target = resolve_write_path(path)
@@ -123,11 +98,7 @@ def write_file(path: str, content: str, overwrite: bool = False) -> str:
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write to a temporary file in the SAME directory, then rename. A
-        # partial write from a crash or a full disk would otherwise leave a
-        # truncated source file that still compiles-ish, which is worse than
-        # no file at all. Same directory because os.replace is only atomic
-        # within one filesystem.
+        # Same directory keeps os.replace atomic within one filesystem.
         handle, temporary = tempfile.mkstemp(
             dir=target.parent,
             prefix=f".{target.name}.",
@@ -140,8 +111,6 @@ def write_file(path: str, content: str, overwrite: bool = False) -> str:
 
             os.replace(temporary, target)
         except BaseException:
-            # Includes KeyboardInterrupt/SystemExit on purpose: leaving a
-            # stray .tmp beside a source file is a confusing artefact.
             Path(temporary).unlink(missing_ok=True)
             raise
 

@@ -1,5 +1,3 @@
-"""Fetch HTTPS response tool for Windows Agent MCP Server."""
-
 from __future__ import annotations
 
 import urllib.request
@@ -14,40 +12,12 @@ __all__: list[str] = ["fetch_https_response"]
 def fetch_https_response(
     url: str,
 ) -> str:
-    """Fetch text from an approved HTTPS URL.
-
-    Allowed domains are restricted to trusted development sources such as GitHub and Premake.
-
-    Maximum response size: 2 MB.
-
-    Useful for:
-        - release metadata
-        - documentation
-        - GitHub API responses
-        - text configuration files
-
-    Args:
-        url: HTTPS URL to fetch. Must be in an allowlisted domain.
-
-    Returns:
-        UTF-8 decoded string content from the response, or error message on failure.
-
-    Raises:
-        ValueError: If URL is invalid, not HTTPS, or hostname not allowlisted.
-        Exception: For network errors or other failures.
-
-    Example:
-        >>> fetch_https_response("https://api.github.com/repos/example/repo/releases/latest")
-        '{"name": "v1.0", ...}',  # JSON response decoded as string
-    """
+    """Fetch text from an approved HTTPS URL."""
 
     try:
         validate_url(url)
     except ValueError as exc:
-        # Only URL policy failures land here. Keeping this separate from the
-        # request body matters: ValueError is raised by plenty of ordinary
-        # code (json.JSONDecodeError subclasses it), and mislabelling that as
-        # a refused URL tells the caller to stop rather than retry.
+        # ValueError here is URL policy only: JSONDecodeError subclasses it.
         return mcp_error(
             "URL_NOT_ALLOWED",
             "fetch_https_response",

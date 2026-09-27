@@ -17,33 +17,7 @@ def find_files(
     path: str = ".",
     max_results: int = MAX_FIND_RESULTS,
 ) -> str:
-    """List files matching a name pattern, recursively.
-
-    Use this to answer "what exists" before reading anything: which shaders
-    the project has, where the CMakeLists files are, whether a header is
-    present at all. list_directory shows one level; this searches the tree.
-
-    Build output and version-control directories are skipped automatically
-    (.git, build, out, bin, obj, x64, Debug, Release, Intermediate,
-    node_modules and similar).
-
-    Args:
-        file_glob: Name pattern, comma separated for several, e.g.
-            "*.vert,*.frag,*.hlsl". A pattern without a slash matches the file
-            name at any depth. One with a slash matches the relative path and
-            anchors the prefix only -- "shaders/*.glsl" also matches
-            "shaders/post/blur.glsl", because "*" spans directories.
-        path: Directory to search. Defaults to the current directory.
-        max_results: Maximum paths to report. Defaults to 500.
-
-    Returns:
-        Plain text: one relative path per line, then a count. A structured
-        JSON error on failure.
-
-    Example:
-        >>> find_files("*.vert,*.frag", "shaders")
-        'FIND: *.vert,*.frag in shaders\\n\\nshaders/post/blur.frag\\n...'
-    """
+    """List files matching a name pattern, recursively."""
 
     patterns = split_globs(file_glob)
 

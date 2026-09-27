@@ -1,41 +1,10 @@
-"""PowerShell security policy for Windows Agent MCP Server.
-
-What this policy now guarantees:
-
-    * exactly ONE command runs per call -- no separators, pipelines,
-      redirections or subexpressions, so the allowlist cannot be sidestepped
-      by appending a second command;
-    * that command's executable is on ALLOWED_COMMANDS;
-    * no interpreter is handed code inline (`python -c`, `node -e`).
-
-What it does NOT guarantee, and cannot:
-
-    * an allowlisted interpreter given a FILE runs whatever that file
-      contains -- `python build.py` is arbitrary code, by design, because
-      running project scripts is the point of the tool;
-    * `npx` and `pip` fetch and execute third-party packages;
-    * an allowlisted build tool runs whatever its build files say.
-
-So this is a meaningful boundary on *what program starts*, not a sandbox on
-what that program then does. For untrusted input, isolate at the OS level.
-"""
+"""PowerShell security policy: bounds which program starts, not what it does."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-# ============================================================
-# PowerShell security policy
-# ============================================================
-
-# IMPORTANT: defense-in-depth only, NOT "allow every PowerShell command". It
-# permits common development executables/cmdlets, and bounds WHICH PROGRAM
-# starts -- not what it then does: `python build.py` runs whatever that file
-# contains, and `npx`/`pip` fetch and execute third-party packages. Treat it as
-# a convenience that keeps obvious mistakes out, not a hardened security boundary.
-
 ALLOWED_COMMANDS: set[str] = {
-    # Development tools
     "git",
     "git.exe",
     "cmake",
@@ -76,15 +45,6 @@ ALLOWED_COMMANDS: set[str] = {
     "msbuild.exe",
     "ctest",
     "ctest.exe",
-    # Shader compilers and SPIR-V tools.
-    #
-    # A renderer cannot be worked on without these: compiling a shader is the
-    # tightest feedback loop in graphics code, and without them the model can
-    # write GLSL/HLSL but never find out whether it compiles. glslc and
-    # glslangValidator ship with the Vulkan SDK, dxc with both the Vulkan SDK
-    # and the Windows SDK, fxc with the Windows SDK. run_powershell rebuilds
-    # PATH from the registry, so an SDK installed after this process started
-    # is still found.
     "glslc",
     "glslc.exe",
     "glslangValidator",
@@ -101,37 +61,25 @@ ALLOWED_COMMANDS: set[str] = {
     "spirv-opt.exe",
     "spirv-cross",
     "spirv-cross.exe",
-    # Archive tools
     "tar",
     "tar.exe",
     "7z",
     "7z.exe",
-    # Basic filesystem navigation
     "cd",
-    # Basic filesystem inspection
     "Get-Location",
     "Get-ChildItem",
     "Get-Item",
     "Test-Path",
     "Get-Content",
     "Select-String",
-    # Basic filesystem creation/manipulation
     "New-Item",
     "Copy-Item",
     "Move-Item",
-    # Environment inspection
     "Get-Command",
     "Get-ComputerInfo",
     "Get-Process",
 }
 
-# Programs build_project will drive.
-#
-# A strict subset of ALLOWED_COMMANDS, and narrower on purpose. build_project
-# executes argv directly with no shell, so a PowerShell cmdlet such as
-# Get-ChildItem cannot run at all -- and "cmdlet failed to start" is a far
-# worse error message than "that is not a build command". Restricting the set
-# up front turns a confusing exec failure into an actionable one.
 BUILD_COMMANDS: set[str] = {
     "cmake",
     "cmake.exe",
@@ -163,7 +111,6 @@ BUILD_COMMANDS: set[str] = {
     "py.exe",
 }
 
-# Shader compilers, keyed by the executable compile_shader will invoke.
 SHADER_COMPILERS: set[str] = {
     "glslc",
     "glslangValidator",
@@ -173,27 +120,7 @@ SHADER_COMPILERS: set[str] = {
 
 
 def extract_command_name(command: str) -> str:
-    """Extract the first token/command name from a PowerShell command.
-
-    This is intentionally simple because the command is already subject to the
-    stricter token policy.
-
-    Args:
-        command: PowerShell command string.
-
-    Returns:
-        The first word/token of the command (stripped).
-
-    Raises:
-        ValueError: If command is empty or has unterminated quotes.
-
-    Example:
-        >>> extract_command_name("python --version")
-        'python',
-
-        >>> extract_command_name('"git" status')
-        'git',
-    """
+    """Extract the first token/command name from a PowerShell command."""
 
     tokens = tokenize_command(command)
 
@@ -204,24 +131,9 @@ def extract_command_name(command: str) -> str:
 
 
 def is_command_allowed(command: str) -> bool:
-    """Check whether the command's executable is on the allowlist.
+    """Check whether the command's executable is on the allowlist."""
 
-    Only meaningful once find_command_composition() has confirmed the string
-    holds a single command; otherwise this describes the first of several.
-
-    Args:
-        command: PowerShell command to check.
-
-    Returns:
-        True if the command name or its basename is in ALLOWED_COMMANDS.
-
-    Example:
-        >>> is_command_allowed("python --version")
-        True
-
-        >>> is_command_allowed("rm -rf /")
-        False
-    """
+    # Only meaningful after composition confirms a single command.
 
     command_name = extract_command_name(command)
 
@@ -230,17 +142,7 @@ def is_command_allowed(command: str) -> bool:
     return command_name in ALLOWED_COMMANDS or command_basename in ALLOWED_COMMANDS
 
 
-# ============================================================
-# Command composition
-# ============================================================
-
-# Characters that start a second command, capture another command's output, or
-# write to the filesystem outside the allowlist's reach.
-#
-# These are only rejected OUTSIDE quotes. A blanket textual search would
-# reject ordinary work -- `git commit -m "fix; cleanup"` and
-# `pip install "requests>=2.0"` both carry one of these inside a quoted
-# argument, where PowerShell treats it as literal text.
+# Rejected outside quotes only; quoted text is literal.
 _COMPOSITION_OPERATORS: dict[str, str] = {
     ";": "statement separator ';'",
     "|": "pipeline '|'",
@@ -254,25 +156,9 @@ _COMPOSITION_OPERATORS: dict[str, str] = {
 
 
 def find_command_composition(command: str) -> str | None:
-    """Find any construct that would run a second command.
+    """Find any construct that would run a second command."""
 
-    The allowlist inspects one executable name, so it only means anything if
-    the string contains exactly one command. Without this check
-    `git status; Stop-Computer` passed: the first token was `git`, and
-    everything after the separator went unexamined.
-
-    Quoting is honoured, because PowerShell honours it -- with one exception.
-    `$(...)` interpolates *inside* double quotes, so it executes there and is
-    rejected in double-quoted text as well as unquoted text. Single quotes are
-    literal in PowerShell, so nothing inside them can run.
-
-    Args:
-        command: PowerShell command to inspect.
-
-    Returns:
-        A description of the first offending construct, or None if the command
-        is a single statement.
-    """
+    # $(...) executes inside double quotes, so it is rejected there too.
 
     in_single = False
     in_double = False
@@ -284,7 +170,6 @@ def find_command_composition(command: str) -> str | None:
         char = command[index]
 
         if in_single:
-            # '' is an escaped literal quote; anything else is literal text.
             if char == "'":
                 if command[index + 1 : index + 2] == "'":
                     index += 2
@@ -295,7 +180,6 @@ def find_command_composition(command: str) -> str | None:
 
         if in_double:
             if char == "`":
-                # Escapes the following character, including a quote.
                 index += 2
                 continue
             if char == '"':
@@ -310,7 +194,6 @@ def find_command_composition(command: str) -> str | None:
             index += 1
             continue
 
-        # Unquoted.
         if char == "'":
             in_single = True
             index += 1
@@ -338,30 +221,8 @@ def find_command_composition(command: str) -> str | None:
     return None
 
 
-# ============================================================
-# Tokenisation
-# ============================================================
-
-
 def tokenize_command(command: str) -> list[str]:
-    """Split a command into tokens, honouring PowerShell quoting.
-
-    Quotes are removed from the tokens they delimit, so a quoted executable
-    path arrives as a plain path.
-
-    Args:
-        command: PowerShell command to split.
-
-    Returns:
-        The command's tokens, in order.
-
-    Raises:
-        ValueError: If the command is empty or a quoted string is unterminated.
-
-    Example:
-        >>> tokenize_command('"C:/Program Files/Git/git.exe" status')
-        ['C:/Program Files/Git/git.exe', 'status']
-    """
+    """Split a command into tokens, honouring PowerShell quoting."""
 
     if not command.strip():
         raise ValueError("Command cannot be empty.")
@@ -443,16 +304,6 @@ def tokenize_command(command: str) -> list[str]:
     return tokens
 
 
-# ============================================================
-# Interpreters
-# ============================================================
-
-# Allowlisting an interpreter allows whatever it is told to run. Blocking the
-# inline-code switches removes the direct route, so the allowlist governs
-# which *program* runs rather than being bypassed outright in one argument.
-#
-# This does NOT contain an interpreter given a script file: `python build.py`
-# still runs whatever build.py contains. See the module docstring.
 INLINE_CODE_FLAGS: dict[str, frozenset[str]] = {
     "python": frozenset({"-c", "--command"}),
     "py": frozenset({"-c", "--command"}),
@@ -461,23 +312,12 @@ INLINE_CODE_FLAGS: dict[str, frozenset[str]] = {
 
 
 def find_inline_code_flag(command: str) -> str | None:
-    """Find an interpreter switch that executes code supplied inline.
-
-    Args:
-        command: PowerShell command to inspect.
-
-    Returns:
-        A description of the offending switch, or None.
-
-    Raises:
-        ValueError: If the command cannot be tokenised.
-    """
+    """Find an interpreter switch that executes code supplied inline."""
 
     tokens = tokenize_command(command)
 
     executable = Path(tokens[0]).name.lower()
 
-    # Drop a Windows executable suffix so "python.exe" matches "python".
     for suffix in (".exe", ".cmd", ".bat", ".com"):
         if executable.endswith(suffix):
             executable = executable[: -len(suffix)]
@@ -489,14 +329,12 @@ def find_inline_code_flag(command: str) -> str | None:
         return None
 
     for token in tokens[1:]:
-        # Match "-c" and the glued "-c<code>" form alike.
         candidate = token.split("=", 1)[0]
 
         if candidate in flags:
             return f"{executable} {candidate} (runs code supplied inline)"
 
         if token.startswith("-") and not token.startswith("--"):
-            # Short switches may be glued to their value: -cprint(1)
             for flag in flags:
                 if len(flag) == 2 and token.startswith(flag) and len(token) > 2:
                     return f"{executable} {flag} (runs code supplied inline)"
@@ -504,44 +342,13 @@ def find_inline_code_flag(command: str) -> str | None:
     return None
 
 
-# ============================================================
-# File-creation cmdlets
-# ============================================================
-
-# Cmdlets whose destination arguments escape the cwd confinement that
-# governs execution. run_powershell used to check WHERE a command runs but
-# never WHAT it writes, so `New-Item C:\elsewhere\junk.txt` succeeded under
-# a default (download-root-only) config. find_cmdlet_destinations()
-# extracts the write targets so run_powershell can run them through the
-# same resolve_write_path() confinement as write_file/edit_file.
 FILE_WRITE_CMDLETS: frozenset[str] = frozenset({"new-item", "copy-item", "move-item"})
 
-# Switch parameters that take no value: the token after one is positional,
-# not its value. Any other -param consumes exactly one following token, so
-# values like `-ErrorAction Stop` are never mistaken for destinations.
 _VALUELESS_SWITCHES: frozenset[str] = frozenset({"force", "recurse", "passthru", "whatif", "confirm"})
 
 
 def find_cmdlet_destinations(command: str) -> list[str] | None:
-    """Destination paths a file-creation cmdlet would write, if any.
-
-    Only the WRITE side is returned: New-Item's -Path/first positional
-    (joined with -Name when given), Copy/Move's -Destination/last
-    positional. Copy/Move sources are reads, deliberately unconfined like
-    read_file. A -WhatIf dry run writes nothing and yields None like a
-    non-cmdlet.
-
-    Args:
-        command: Single PowerShell command (composition already checked).
-
-    Returns:
-        None when the command is not a file-creation cmdlet (or is a
-        -WhatIf dry run). Otherwise the destination path strings, which may
-        be EMPTY when the cmdlet carries no identifiable destination --
-        the caller must reject that fail-closed (PowerShell itself would
-        prompt and die non-interactively). Never raises: unparsable input
-        yields None, leaving the verdict to the allowlist check.
-    """
+    """Destination paths a file-creation cmdlet would write, if any."""
 
     try:
         tokens = tokenize_command(command)
@@ -564,8 +371,6 @@ def find_cmdlet_destinations(command: str) -> list[str] | None:
         token = tokens[index]
 
         if token.startswith("-") and len(token) > 1:
-            # `-Param:value` and `-Param value` alike; a trailing lone `-`
-            # is a positional path, not a switch.
             name, separator, inline = token[1:].partition(":")
 
             name = name.lower()
@@ -609,9 +414,7 @@ def find_cmdlet_destinations(command: str) -> list[str] | None:
     if destination_param is not None:
         return [destination_param]
 
-    # The last positional is the destination -- but only when a source
-    # precedes it. A lone positional is a source with no destination
-    # (PowerShell would prompt and die non-interactively), never a target.
+    # A lone positional prompts and dies; only a second positional is a target.
     if len(positionals) >= 2:
         return [positionals[-1]]
 

@@ -1,21 +1,4 @@
-"""Pluggable web-search backends.
-
-Only DuckDuckGo ships today. The Protocol exists so Brave or a self-hosted
-SearXNG can be added without touching the tool, selected by
-WAMCP_SEARCH_BACKEND.
-
-The design problem here is not fetching results -- it is telling three
-outcomes apart:
-
-    results       -> a list
-    no results    -> the query genuinely matched nothing
-    blocked       -> we were rate-limited, or the layout changed
-
-Conflating the last two is the failure that matters. A small model told "no
-results" will rewrite its query and try again forever; told "blocked" it can
-wait or ask the user. So a parse that finds nothing is never reported as
-"no results" unless the page explicitly says so.
-"""
+"""Pluggable web-search backends."""
 
 from __future__ import annotations
 
@@ -52,9 +35,7 @@ __all__: list[str] = [
     "parse_duckduckgo",
 ]
 
-# Minimum gap between search requests. A model told to research will loop, and
-# DuckDuckGo answers a burst with anomaly pages -- which then presents as
-# exactly the blocked/no-results ambiguity this module exists to avoid.
+# Spacing requests avoids anomaly pages.
 MIN_REQUEST_INTERVAL_SECONDS: float = 2.0
 
 
@@ -67,17 +48,9 @@ class SearchResult(NamedTuple):
 
 
 class SearchOutcome(NamedTuple):
-    """The result of a search attempt.
-
-    Attributes:
-        status: "results", "empty" (query matched nothing) or "blocked"
-            (rate-limited, challenged, or the layout no longer parses).
-        results: Hits, when status is "results".
-        detail: Human-readable explanation, when status is "blocked".
-    """
+    """The result of a search attempt."""
 
     status: Literal["results", "empty", "blocked"]
-    # Immutable default: a NamedTuple default is shared by every instance.
     results: tuple[SearchResult, ...] = ()
     detail: str = ""
 
@@ -93,18 +66,12 @@ class SearchBackend(Protocol):
         ...
 
 
-# ============================================================
-# DuckDuckGo
-# ============================================================
-
-# The "lite" endpoint in preference to "html": a plain table rather than
-# nested divs, several times smaller (which matters for both the byte cap and
-# a small context window), and historically the more stable of the two.
+# lite: a plain table, smaller and historically steadier.
 _DDG_ENDPOINT = "https://lite.duckduckgo.com/lite/"
 
 _DDG_HOSTS = frozenset({"lite.duckduckgo.com", "html.duckduckgo.com", "duckduckgo.com"})
 
-# Markers that mean "we were refused", not "nothing matched".
+# Markers meaning refused, not empty.
 _BLOCKED_MARKERS = (
     "anomaly",
     "bots use duckduckgo",
@@ -120,38 +87,19 @@ _EMPTY_MARKERS = (
     "not match any documents",
 )
 
-# A real result page is never this small; a challenge or error page often is.
+# Real result pages are never this small.
 _MIN_PLAUSIBLE_BODY_BYTES = 1500
 
 
 def _unwrap_ddg_url(href: str) -> str | None:
-    """Recover the real target from a DuckDuckGo redirect wrapper.
-
-    Hrefs arrive in three shapes, and all three occur on live pages:
-
-        //duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fp&rut=...
-        /l/?uddg=https%3A%2F%2Fexample.com%2Fp
-        https://example.com/p          (already direct)
-
-    Two traps: the wrapper is protocol-relative, so urlparse reports an empty
-    scheme; and parse_qs ALREADY percent-decodes once, so calling unquote on
-    its output corrupts any target containing a literal %25 into a
-    wrong-but-plausible URL.
-
-    Args:
-        href: Raw href from the results page.
-
-    Returns:
-        An absolute URL, or None if nothing usable could be recovered.
-    """
+    """Recover the real target from a DuckDuckGo redirect wrapper."""
 
     href = strip_unsafe_characters(href).strip()
 
     if not href:
         return None
 
-    # Give the protocol-relative and root-relative forms a scheme and host so
-    # urlparse can see the query string.
+    # Relative forms need a scheme and host for urlparse.
     if href.startswith("//"):
         candidate = "https:" + href
     elif href.startswith("/"):
@@ -167,7 +115,7 @@ def _unwrap_ddg_url(href: str) -> str | None:
         if not values or not values[0]:
             return None
 
-        # Already decoded exactly once by parse_qs. Do not unquote again.
+        # parse_qs already decodes once; never unquote again.
         return values[0]
 
     if parsed.scheme in {"http", "https"}:
@@ -176,31 +124,13 @@ def _unwrap_ddg_url(href: str) -> str | None:
     return None
 
 
-# Query parameters and paths that mark a sponsored result. Observed live: an
-# ad arrives as https://duckduckgo.com/y.js?ad_domain=...&ad_provider=... with
-# a click-tracking URL running to ~2000 characters, which on its own would
-# consume a meaningful slice of a 7B model's context.
 _AD_MARKERS = ("/y.js", "ad_domain=", "ad_provider=", "ad_type=")
 
-# Longer than any URL worth showing. Truncating a URL would make it unusable,
-# so an over-long one is dropped instead -- in practice they are trackers.
 _MAX_RESULT_URL_CHARS = 500
 
 
 def _is_advertisement(url: str) -> bool:
-    """Detect a sponsored result or tracking redirect.
-
-    Ads are not useful answers and their URLs are enormous, so they are
-    dropped rather than shown. This also removes the "more info" link that
-    accompanies an ad block, which was previously surfaced as a result in its
-    own right.
-
-    Args:
-        url: Unwrapped result URL.
-
-    Returns:
-        True if the URL looks like an ad or tracker.
-    """
+    """Detect a sponsored result or tracking redirect."""
 
     if len(url) > _MAX_RESULT_URL_CHARS:
         return True
@@ -210,18 +140,13 @@ def _is_advertisement(url: str) -> bool:
     if any(marker in lowered for marker in _AD_MARKERS):
         return True
 
-    # DuckDuckGo's own help pages are never the answer to a technical query,
-    # and the "more info" ad link points at them.
     return "duckduckgo.com/duckduckgo-help-pages" in lowered
 
 
 def _clean_field(value: str) -> str:
-    """Sanitise and cap one attacker-controlled result field.
+    """Sanitise and cap one attacker-controlled result field."""
 
-    Newlines are collapsed because the tool renders results as a numbered
-    list; a snippet containing a newline would break the shape the model is
-    reading.
-    """
+    # Newlines would break the numbered list.
 
     text = strip_unsafe_characters(value)
     text = " ".join(text.split())
@@ -233,18 +158,7 @@ def _clean_field(value: str) -> str:
 
 
 def parse_duckduckgo(html: str, max_results: int) -> SearchOutcome:
-    """Parse a DuckDuckGo results page.
-
-    Pure function so it can be tested against saved captures.
-
-    Args:
-        html: Decoded page HTML.
-        max_results: Maximum hits to return.
-
-    Returns:
-        The outcome. "blocked" whenever the page cannot be trusted to be a
-        genuine result page -- never "empty" on a mere parse failure.
-    """
+    """Parse a DuckDuckGo results page."""
 
     lowered = html.lower()
 
@@ -259,8 +173,6 @@ def parse_duckduckgo(html: str, max_results: int) -> SearchOutcome:
 
     results: list[SearchResult] = []
 
-    # The lite layout is a table of rows; the html layout uses div.result.
-    # Selectors are data so a layout change is a one-line edit.
     for title_selector, snippet_selector in (
         ("a.result-link", "td.result-snippet"),
         ("a.result__a", "a.result__snippet"),
@@ -271,22 +183,10 @@ def parse_duckduckgo(html: str, max_results: int) -> SearchOutcome:
         if not title_nodes:
             continue
 
-        # Identity membership, not tag name: in the html/ layout the snippet
-        # selector is "a.result__snippet" -- also an <a> -- so testing
-        # node.name would classify every snippet as a title.
+        # Identity, not tag name: snippets are also <a>.
         title_ids = {id(node) for node in title_nodes}
 
-        # Titles and snippets are paired by walking the document ONCE, in
-        # order, rather than by zipping two flat lists by index.
-        #
-        # Index pairing looks equivalent and is not: a sponsored block
-        # contributes two anchors (the ad plus its "more info" link) but only
-        # one snippet, which shifts every later pair by one. The observed
-        # result was a Stack Overflow snippet printed under a DuckDuckGo help
-        # page title -- mismatched data, which is worse than missing data.
-        #
-        # A comma selector returns nodes in document order, so a snippet is
-        # attached to the anchor it actually followed.
+        # Walk once: index pairing mismatches titles and snippets.
         for node in soup.select(f"{title_selector}, {snippet_selector}"):
             if len(results) >= max_results:
                 break
@@ -302,12 +202,7 @@ def parse_duckduckgo(html: str, max_results: int) -> SearchOutcome:
                 if target is None or _is_advertisement(target):
                     continue
 
-                # Shape only, deliberately: a result must never be shown to
-                # the model as a javascript:, file: or credential-bearing URL.
-                # But resolving each hit would mean a DNS lookup per result
-                # and would stop this being a pure function -- and nothing is
-                # fetched here. fetch_web_page runs the full check, DNS
-                # included, before it retrieves anything.
+                # Shape only: fetch_web_page validates before retrieving.
                 try:
                     validate_url_shape(target)
                 except ValueError:
@@ -322,8 +217,6 @@ def parse_duckduckgo(html: str, max_results: int) -> SearchOutcome:
                 )
                 continue
 
-            # A snippet belongs to the most recent anchor, and only if that
-            # anchor does not already have one.
             if results and not results[-1].snippet:
                 results[-1] = results[-1]._replace(
                     snippet=_clean_field(node.get_text(" "))
@@ -334,7 +227,6 @@ def parse_duckduckgo(html: str, max_results: int) -> SearchOutcome:
     if results:
         return SearchOutcome(status="results", results=tuple(results))
 
-    # Nothing parsed. Only claim "no results" if the page says so itself.
     for marker in _EMPTY_MARKERS:
         if marker in lowered:
             return SearchOutcome(status="empty")
@@ -349,12 +241,6 @@ def parse_duckduckgo(html: str, max_results: int) -> SearchOutcome:
 
 
 class DuckDuckGoBackend:
-    """Search via DuckDuckGo's lite HTML endpoint.
-
-    The opener is injected rather than imported so tests can pass a fake
-    directly, instead of monkeypatching a module attribute.
-    """
-
     name = "duckduckgo"
     allowed_hosts = _DDG_HOSTS
 
@@ -365,8 +251,6 @@ class DuckDuckGoBackend:
         sleep: Callable[[float], None] | None = None,
     ) -> None:
         self._opener = opener if opener is not None else SEARCH_HTTP_OPENER
-        # Clock and sleep are injectable so tests exercise the rate limiter
-        # without actually waiting.
         self._clock: Callable[[], float] = clock or time.monotonic
         self._sleep: Callable[[float], None] = sleep or time.sleep
         self._last_request: float = 0.0
@@ -382,16 +266,7 @@ class DuckDuckGoBackend:
         self._last_request = self._clock()
 
     def search(self, query: str, max_results: int) -> SearchOutcome:
-        """Run a query against DuckDuckGo.
-
-        Args:
-            query: Search terms.
-            max_results: Maximum hits to return.
-
-        Returns:
-            The outcome. Network and protocol failures come back as "blocked"
-            with a detail string rather than raising.
-        """
+        """Run a query against DuckDuckGo."""
 
         url = _DDG_ENDPOINT + "?" + urllib.parse.urlencode({"q": query})
 
@@ -413,11 +288,7 @@ class DuckDuckGoBackend:
             with self._opener.open(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
                 status = getattr(response, "status", 200)
 
-                # 202 is DuckDuckGo's anomaly response. It matters because
-                # urllib treats every 2xx as success, so a blocked page
-                # arrives as a perfectly normal response object and would
-                # otherwise parse to zero results and be reported as "no
-                # results found".
+                # urllib treats 2xx as success, so 202 arrives normally.
                 if status == 202:
                     return SearchOutcome(
                         status="blocked",
@@ -455,29 +326,11 @@ class DuckDuckGoBackend:
         return parse_duckduckgo(decode_html(raw), max_results)
 
 
-# ============================================================
-# Selection
-# ============================================================
-
 BACKEND_NAMES: tuple[str, ...] = ("duckduckgo",)
 
 
 def get_backend(name: str | None = None) -> SearchBackend:
-    """Return the configured search backend.
-
-    Args:
-        name: Backend name. Defaults to WAMCP_SEARCH_BACKEND, then
-            "duckduckgo".
-
-    Returns:
-        The backend.
-
-    Raises:
-        ValueError: If the name is not recognised. Deliberately not a silent
-            fallback -- a typo in the environment variable would otherwise be
-            invisible forever, with the operator believing they had switched
-            provider.
-    """
+    """Return the configured search backend."""
 
     requested = (name or os.environ.get(SEARCH_BACKEND_ENV_VAR, "")).strip().lower()
 
@@ -491,7 +344,6 @@ def get_backend(name: str | None = None) -> SearchBackend:
 
 
 def log_search(query: str, outcome: SearchOutcome) -> None:
-    """Record a search on stderr for the operator's audit trail."""
 
     log.info(
         "web_search q=%r status=%s hits=%d",

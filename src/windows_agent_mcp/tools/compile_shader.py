@@ -18,10 +18,7 @@ from ..utils import (
 
 __all__: list[str] = ["compile_shader"]
 
-# Extension -> glslc shader stage. These are the conventional Vulkan SDK
-# suffixes, and glslc infers the stage from them on its own; the mapping is
-# kept so an unknown extension is a clear error rather than a confusing one
-# from the compiler.
+# glslc infers the stage from these; unknown extensions error clearly.
 _GLSL_STAGES: dict[str, str] = {
     ".vert": "vertex",
     ".frag": "fragment",
@@ -39,10 +36,8 @@ _GLSL_STAGES: dict[str, str] = {
     ".rcall": "rcall",
 }
 
-# Stages accepted for the ambiguous ".glsl" extension.
 _VALID_STAGES = frozenset(_GLSL_STAGES.values())
 
-# dxc and fxc profiles: ps_6_6, vs_5_0, lib_6_3, cs_6_0.
 _PROFILE_PATTERN = re.compile(r"^[A-Za-z]{2,4}_[0-9]+_[0-9]+$")
 
 _HLSL_EXTENSIONS = frozenset({".hlsl", ".hlsli"})
@@ -57,42 +52,7 @@ def compile_shader(
     spirv: bool = False,
     working_directory: str | None = None,
 ) -> str:
-    """Compile a shader and report errors with file and line.
-
-    The compiler is chosen from the file extension:
-
-    * .vert .frag .comp .geom .tesc .tese .mesh .task .rgen .rchit .rahit
-      .rmiss .rint .rcall -> glslc (Vulkan SPIR-V). Nothing else is needed.
-    * .glsl -> glslc, but you must pass `stage` (vertex, fragment, compute,
-      geometry, tesscontrol, tesseval, mesh, task or a ray-tracing stage).
-    * .hlsl -> dxc. You must pass `profile`, e.g. "ps_6_6" or "cs_6_0". Pass
-      spirv=true to target Vulkan instead of DXIL.
-    * .fx -> fxc, which also needs `profile`.
-
-    glslangValidator is used automatically if glslc is not installed.
-
-    The output file is written beside the source unless `output` says
-    otherwise, and is subject to the same write confinement as write_file:
-    the download root, or a directory in WAMCP_PROJECT_ROOTS.
-
-    Args:
-        source: Shader file to compile.
-        output: Destination. Defaults to the source path plus .spv (SPIR-V),
-            .dxil (dxc) or .cso (fxc).
-        stage: Shader stage, required only for a bare .glsl file.
-        profile: Target profile, required for .hlsl and .fx.
-        spirv: For .hlsl, emit SPIR-V for Vulkan rather than DXIL.
-        working_directory: Directory to compile in, and what relative paths
-            are resolved against. Defaults to the download root.
-
-    Returns:
-        A plain-text report: the output path and size on success, or errors
-        with file and line. A structured JSON error on failure to start.
-
-    Example:
-        >>> compile_shader("shaders/post/blur.frag", working_directory="C:/game")
-        'COMPILE: glslc shaders/post/blur.frag  (exit code 0)\\n\\n...'
-    """
+    """Compile a shader and report errors with file and line."""
 
     if not source or not source.strip():
         return mcp_error(
@@ -116,8 +76,7 @@ def compile_shader(
             ],
         )
 
-    # Resolve relative to the working directory rather than the server's cwd,
-    # so a path that works for build_project works here too.
+    # Relative to the working directory, as in build_project.
     source_path = Path(source)
 
     if not source_path.is_absolute():
@@ -262,8 +221,7 @@ def compile_shader(
 
     header = f"COMPILE: {chosen} {display_source.replace(chr(92), '/')}"
 
-    # Naming the artefact and its size is the confirmation that matters: a
-    # zero exit code with no output file means the compiler did nothing.
+    # A zero exit with no artefact means the compiler did nothing.
     success_line = None
 
     if output_path.is_file():
@@ -283,8 +241,6 @@ def compile_shader(
         header=header,
         exit_code=result.exit_code,
         raw_output=result.combined,
-        # "BUILD FAILED" for one bad shader reads as though the whole project
-        # failed, which sends the model looking in the wrong place.
         subject="COMPILE",
         success_line=success_line,
         elapsed_ms=result.elapsed_ms,
@@ -298,12 +254,7 @@ def _plan_compile(
     profile: str,
     spirv: bool,
 ) -> tuple[list[str], str] | str:
-    """Decide which compiler to use, or return an error envelope.
-
-    Returns:
-        (candidate executables in preference order, default output extension),
-        or a structured error string when the request cannot be satisfied.
-    """
+    """Decide which compiler to use, or return an error envelope."""
 
     if suffix in _HLSL_EXTENSIONS or suffix in _FX_EXTENSIONS:
         if not profile:
@@ -370,8 +321,7 @@ def _plan_compile(
             ],
         )
 
-    # glslc first: better diagnostics and it understands #include. Fall back
-    # to glslangValidator, which some Vulkan SDK installs ship without glslc.
+    # glslc first: better diagnostics and #include support.
     return ["glslc", "glslangValidator"], ".spv"
 
 
@@ -386,11 +336,7 @@ def _build_argv(
     profile: str,
     spirv: bool,
 ) -> list[str]:
-    """Assemble the compiler command line.
-
-    Built as argv and executed with no shell, so nothing here is reparsed and
-    a path containing spaces needs no quoting.
-    """
+    """Assemble the compiler command line with no shell."""
 
     if compiler == "glslc":
         argv = [executable, str(source), "-o", str(output)]
@@ -401,8 +347,6 @@ def _build_argv(
         return argv
 
     if compiler == "glslangValidator":
-        # -V means "produce SPIR-V for Vulkan". -S sets the stage, which
-        # glslangValidator needs spelled with its own short names.
         argv = [executable, "-V", str(source), "-o", str(output)]
 
         if stage:
@@ -418,7 +362,6 @@ def _build_argv(
 
         return argv
 
-    # fxc uses slash-prefixed options.
     del suffix
 
     return [executable, "/T", profile, "/Fo", str(output), str(source)]

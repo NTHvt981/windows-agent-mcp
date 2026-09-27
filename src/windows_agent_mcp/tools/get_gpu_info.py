@@ -16,13 +16,9 @@ from ..process import get_windows_development_environment, run_process
 
 __all__: list[str] = ["get_gpu_info"]
 
-# Probes are separate processes and each one can hang on a broken driver, so
-# every call is individually bounded. Short: this is an orientation tool, and
-# a model waiting thirty seconds for it has already lost.
 _WMI_TIMEOUT_SECONDS = 20
 _VULKANINFO_TIMEOUT_SECONDS = 20
 
-# Cap on reproduced vulkaninfo lines, applied after the filtering below.
 _MAX_VULKAN_LINES = 60
 
 # "/Date(1719705600000)/" -- ConvertTo-Json's DateTime form.
@@ -30,16 +26,8 @@ _WMI_DATE_PATTERN = re.compile(r"^/Date\((-?\d+)\)/$")
 
 _ISO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
-# vulkaninfo --summary leads with the instance extension and layer lists, which
-# on a real machine run to forty-odd lines of "VK_KHR_x : extension revision 1"
-# before reaching the device list. The device list is the part that answers the
-# question -- deviceName, apiVersion, driverVersion -- so the lists are dropped
-# and their counts kept. Observed first-hand: a three-adapter machine with 20
-# extensions and 17 layers pushed the devices past the line cap entirely, so
-# the section reported everything except the GPUs.
 _VULKAN_DEVICES_MARKER = "Devices:"
 
-# Executables worth knowing about, in the order they matter for graphics work.
 _TOOLCHAIN = (
     "glslc",
     "glslangValidator",
@@ -55,7 +43,6 @@ _TOOLCHAIN = (
     "msbuild",
 )
 
-# Environment variables that locate the SDKs these tools come from.
 _SDK_VARIABLES = (
     "VULKAN_SDK",
     "VK_SDK_PATH",
@@ -69,35 +56,7 @@ _SDK_VARIABLES = (
 
 
 def get_gpu_info() -> str:
-    """Report the GPU adapters, driver versions and graphics toolchain.
-
-    Answers the questions a renderer needs settled before generating code:
-    which adapter is present, which driver, whether the Vulkan SDK and the
-    shader compilers are installed, and which Vulkan API version the driver
-    reports. Without this a model guesses at extension and feature support,
-    and code that compiles then fails at device creation.
-
-    Reads the adapter list through WMI and, when vulkaninfo is installed,
-    Vulkan's own view of the device. Both probes are individually
-    time-limited, so a broken driver degrades one section rather than failing
-    the call.
-
-    Note: Direct3D feature levels are NOT reported. Obtaining them requires
-    creating a D3D12 device, which this server does not do -- so a feature
-    level here would be a guess. Query it from the application instead.
-
-    Args:
-        None
-
-    Returns:
-        A plain-text report in sections. Sections that could not be probed say
-        so explicitly rather than being omitted, so absence of information is
-        never mistaken for absence of hardware.
-
-    Example:
-        >>> get_gpu_info()
-        'GPU ADAPTERS\\n  NVIDIA GeForce RTX 4070  driver 32.0.15.6094\\n...'
-    """
+    """Report the GPU adapters, driver versions and graphics toolchain."""
 
     try:
         environment = get_windows_development_environment()
@@ -126,13 +85,9 @@ def get_gpu_info() -> str:
 
 
 def _powershell_json(command: str, *, timeout_seconds: int) -> Any | None:
-    """Run a PowerShell expression that emits JSON, returning parsed data.
+    """Run a PowerShell expression that emits JSON, returning parsed data."""
 
-    This bypasses the run_powershell allowlist deliberately: the command is a
-    fixed literal in this file, not caller input, so there is nothing for the
-    allowlist to protect against. Passing it through the allowlist would just
-    mean adding Get-CimInstance to a set that governs model-supplied strings.
-    """
+    # Fixed literals only, so the run_powershell allowlist does not apply.
 
     try:
         result = run_process(
@@ -162,14 +117,9 @@ def _powershell_json(command: str, *, timeout_seconds: int) -> Any | None:
 
 
 def _driver_date(value: object) -> str:
-    """Render a WMI driver date as YYYY-MM-DD, or "" if it cannot be read.
+    """Render a WMI driver date as YYYY-MM-DD, or "" if it cannot be read."""
 
-    ConvertTo-Json does NOT emit ISO 8601 for a DateTime. It emits Microsoft's
-    JSON date form, "/Date(1719705600000)/", where the number is milliseconds
-    since the Unix epoch. Slicing the first ten characters of that -- which is
-    what an ISO assumption produces -- yields "/Date(171", which is how this
-    was first shipped.
-    """
+    # ConvertTo-Json emits /Date(ms)/, not ISO 8601.
 
     if not isinstance(value, str) or not value:
         return ""
@@ -208,8 +158,7 @@ def _adapter_section() -> str:
             "probe failure, not an absence of hardware."
         )
 
-    # ConvertTo-Json emits a bare object for a single adapter and an array for
-    # several, so a one-GPU machine would otherwise crash the iteration.
+    # ConvertTo-Json emits an object for one adapter, an array for several.
     adapters = data if isinstance(data, list) else [data]
 
     lines = ["GPU ADAPTERS"]
@@ -249,9 +198,7 @@ def _adapter_section() -> str:
         ram = entry.get("AdapterRAM")
 
         if isinstance(ram, int) and ram > 0:
-            # WMI's AdapterRAM is a 32-bit field, so anything at or above 4 GB
-            # reports as ~4095 MB. Saying so is more useful than printing a
-            # number the model would reason from.
+            # AdapterRAM is 32-bit, so >= 4 GB reports as ~4095 MB.
             gigabytes = ram / (1024**3)
 
             if gigabytes >= 3.9:
@@ -313,24 +260,14 @@ def _vulkan_section(environment: dict[str, str]) -> str:
 
 
 def _summarise_vulkaninfo(output: str) -> list[str]:
-    """Keep the instance version and the device list, drop the long lists.
-
-    Args:
-        output: Raw vulkaninfo --summary stdout.
-
-    Returns:
-        Indented report lines, capped. Empty when there was nothing to show.
-    """
+    """Keep the instance version and the device list, drop the long lists."""
 
     lines = [line.rstrip() for line in output.splitlines()]
 
     def useful(line: str) -> bool:
-        """Keep any non-blank line that is not just a "====" / "----" rule.
+        """Keep any non-blank line that is not just a rule."""
 
-        The comparison direction matters: `set(stripped) > {"=", "-"}` is a
-        strict-superset test, which requires the line to contain BOTH those
-        characters, and so silently dropped every "deviceName = ..." line.
-        """
+        # Subset, not superset: the latter drops deviceName lines.
 
         stripped = line.strip()
 
@@ -346,7 +283,6 @@ def _summarise_vulkaninfo(output: str) -> list[str]:
     )
 
     if devices_at is None:
-        # No device list to protect, so keep everything and let the cap apply.
         kept = [line.strip() for line in lines if useful(line)]
         omitted = False
     else:

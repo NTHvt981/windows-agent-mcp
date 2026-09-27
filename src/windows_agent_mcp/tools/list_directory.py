@@ -1,5 +1,3 @@
-"""List directory tool for Windows Agent MCP Server."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,22 +10,7 @@ __all__: list[str] = ["list_directory"]
 
 
 def list_directory(path: str = ".") -> str:
-    """List the contents of a directory.
-
-    Returns a plain text listing, directories first then files, each
-    alphabetically. Large directories are truncated rather than refused.
-    This is a read-only operation.
-
-    Args:
-        path: Directory path to list. Defaults to the current directory.
-
-    Returns:
-        A plain text listing, or a structured JSON error on failure.
-
-    Example:
-        >>> list_directory("src")
-        'DIRECTORY: src\\n  [dir]  tools\\n  [file] utils.py\\n\\n2 entries'
-    """
+    """List the contents of a directory."""
 
     try:
         if not path or not path.strip():

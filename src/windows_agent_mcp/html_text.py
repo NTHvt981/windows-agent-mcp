@@ -1,18 +1,4 @@
-"""Turn a fetched HTML page into text a small model can read.
-
-Pure functions: bytes/str in, text out. No network, so every rule here is
-unit-testable on its own.
-
-Two themes run through this module:
-
-* **Context economy.** A 7B-9B model has little room. Boilerplate that a
-  human skims costs the same tokens as the answer, so navigation chrome is
-  dropped where it can be identified safely.
-* **This is untrusted input.** A page can contain text aimed at the model
-  rather than the reader -- in comments, in hidden elements, in a bidi
-  override that visually reverses a URL. Those are removed here, before the
-  text ever reaches the caller.
-"""
+"""Turn a fetched HTML page into text a small model can read."""
 
 from __future__ import annotations
 
@@ -33,7 +19,6 @@ __all__: list[str] = [
     "strip_unsafe_characters",
 ]
 
-# Elements that are never prose. Removed unconditionally.
 _ALWAYS_DROP = (
     "script",
     "style",
@@ -46,24 +31,13 @@ _ALWAYS_DROP = (
     "embed",
 )
 
-# Chrome the page itself labels as non-content. <nav> and <footer> are
-# defined by HTML as navigation and footer material, so dropping them is safe
-# even with no main container. Worth doing: a real page led with twelve lines
-# of navigation before its first sentence, which is pure cost in a small
-# context window.
 _CHROME_DROP = ("nav", "footer", "form")
 
-# Ambiguous chrome, removed ONLY when a main-content container exists.
-# Documentation sites routinely put real prose in <aside>, and <header> can
-# hold an article's own heading, so neither can be dropped on sight.
 _AMBIGUOUS_DROP = ("header", "aside")
 
-# Containers that indicate the page marks its own main content.
 _MAIN_SELECTORS = "main, [role=main], article"
 
-# Charsets servers name when they do not actually know. latin-1 in particular
-# never fails to decode, so honouring a wrong one silently mojibakes every
-# non-ASCII character with no error anywhere.
+# latin-1 never fails, so a wrong one mojibakes silently.
 _UNRELIABLE_CHARSETS = frozenset({"iso-8859-1", "latin-1", "latin1", "us-ascii"})
 
 _META_CHARSET_PATTERN = re.compile(
@@ -71,11 +45,7 @@ _META_CHARSET_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Zero-width and direction-control characters. Invisible to a reader, fully
-# visible to the model -- U+202E can make a displayed URL read backwards.
-# Written as \uXXXX escapes on purpose: as raw characters here they made the
-# source file hold literal line separators (U+2028/U+2029). Do not paste them
-# back as raw.
+# U+202E reverses displayed URLs; raw forms corrupted this file before.
 _INVISIBLE_CHARACTERS = (
     "\u200b\u200c\u200d\u200e\u200f"  # zero-width + LTR/RTL marks
     "\u2028\u2029"  # line + paragraph separators
@@ -86,13 +56,7 @@ _INVISIBLE_CHARACTERS = (
 
 
 class PageText(NamedTuple):
-    """Extracted page content.
-
-    Attributes:
-        title: The document title, or "" when absent.
-        text: Extracted prose, blank-line separated, safe characters only.
-        links: Absolute, deduplicated outbound links.
-    """
+    """Extracted page content."""
 
     title: str
     text: str
@@ -100,18 +64,7 @@ class PageText(NamedTuple):
 
 
 def strip_unsafe_characters(value: str) -> str:
-    """Remove control and direction-manipulating characters.
-
-    Applied to page text, titles, snippets and URLs alike -- a bidi override
-    in a URL is exactly as misleading as one in prose.
-
-    Args:
-        value: Text to clean.
-
-    Returns:
-        The text with C0/C1 controls (except tab and newline) and zero-width
-        or bidi characters removed.
-    """
+    """Remove control and direction-manipulating characters."""
 
     cleaned: list[str] = []
 
@@ -123,7 +76,6 @@ def strip_unsafe_characters(value: str) -> str:
         if char in _INVISIBLE_CHARACTERS:
             continue
 
-        # Cc = control, Cf = format. Both are invisible to a reader.
         if unicodedata.category(char) in {"Cc", "Cf"}:
             continue
 
@@ -133,11 +85,9 @@ def strip_unsafe_characters(value: str) -> str:
 
 
 def _charset_from_meta(raw: bytes) -> str | None:
-    """Find a <meta charset> declaration in the head of a document.
+    """Find a <meta charset> declaration in the head of a document."""
 
-    Deliberately a regex over bytes: parsing the HTML would require already
-    knowing the encoding this function exists to discover.
-    """
+    # Regex over bytes: parsing needs the encoding first.
 
     match = _META_CHARSET_PATTERN.search(raw[:2048])
 
@@ -162,25 +112,7 @@ def _usable_codec(name: str | None) -> str | None:
 
 
 def decode_html(raw: bytes, *, header_charset: str | None = None) -> str:
-    """Decode page bytes to text, degrading rather than failing.
-
-    Precedence, in order:
-
-    1. A UTF-8/UTF-16 byte-order mark. Authoritative, and stripped -- left in
-       place it becomes a stray \\ufeff at the start of the extracted text.
-    2. The HTTP header charset, UNLESS it names one of the historically
-       unreliable defaults (see _UNRELIABLE_CHARSETS).
-    3. A <meta charset> declaration.
-    4. UTF-8 strict, then cp1252, then UTF-8 with replacement.
-
-    Args:
-        raw: Raw response body.
-        header_charset: charset from the Content-Type header, if any.
-
-    Returns:
-        Decoded text. Never raises: a wrong or unknown charset degrades to
-        replacement characters instead of failing the fetch.
-    """
+    """Decode page bytes to text, degrading rather than failing."""
 
     for bom, encoding in (
         (codecs.BOM_UTF8, "utf-8"),
@@ -206,12 +138,7 @@ def decode_html(raw: bytes, *, header_charset: str | None = None) -> str:
     if meta:
         candidates.append(meta)
 
-    # UTF-8 is tried BEFORE an unreliable header, and the order matters more
-    # than it looks: latin-1 decodes any byte sequence without error, so
-    # putting it first would mean utf-8 is never attempted and every UTF-8
-    # page served with an "iso-8859-1" header comes back mojibaked. An
-    # unreliable header is only a last resort, after utf-8 has genuinely
-    # failed.
+    # UTF-8 before latin-1: latin-1 never errors.
     candidates.append("utf-8")
 
     if header and not header_is_reliable:
@@ -229,12 +156,7 @@ def decode_html(raw: bytes, *, header_charset: str | None = None) -> str:
 
 
 def _collapse_blank_lines(text: str) -> str:
-    """Strip each line and collapse runs of blank lines to one.
-
-    Paragraph structure is preserved on purpose. Collapsing everything to a
-    single line would make fetch_web_page's start_line/max_lines paging
-    meaningless.
-    """
+    """Strip each line and collapse runs of blank lines to one."""
 
     lines = [line.strip() for line in text.splitlines()]
 
@@ -253,18 +175,9 @@ def _collapse_blank_lines(text: str) -> str:
 
 
 def _decompose_all(elements: Iterable[Tag]) -> None:
-    """Remove every element, tolerating ones already gone.
+    """Remove every element, tolerating ones already gone."""
 
-    decompose() destroys a tag AND its descendants, so a descendant still
-    pending in the same selection list is already dead by the time the loop
-    reaches it -- and touching its attributes then raises AttributeError,
-    because decompose() sets attrs to None. Real pages hit this constantly
-    (a styled element inside a hidden one), so the guard is required, not
-    defensive.
-
-    Args:
-        elements: Elements to remove, possibly overlapping.
-    """
+    # decompose() kills descendants too; touching them raises.
 
     for element in elements:
         if not element.decomposed:
@@ -272,7 +185,6 @@ def _decompose_all(elements: Iterable[Tag]) -> None:
 
 
 def _is_display_none(element: Tag) -> bool:
-    """Return True when an inline style hides the element."""
 
     style = element.get("style")
 
@@ -283,29 +195,15 @@ def _is_display_none(element: Tag) -> bool:
 
 
 def extract_page(html: str, *, base_url: str, max_links: int) -> PageText:
-    """Extract title, prose and links from an HTML document.
-
-    Args:
-        html: Decoded HTML. Always a str -- bs4's own encoding detection is
-            weak without charset-normalizer, so decode_html() handles that.
-        base_url: URL the document came from, for resolving relative links.
-        max_links: Maximum links to return.
-
-    Returns:
-        The extracted PageText.
-    """
+    """Extract title, prose and links from an HTML document."""
 
     soup = BeautifulSoup(html, "html.parser")
 
-    # Comments are a favourite place to hide instructions: invisible to a
-    # reader, and whether get_text() includes them has changed across bs4
-    # 4.x, so remove them explicitly rather than relying on the default.
+    # get_text() includes comments variably across bs4 4.x.
     for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
         comment.extract()
 
     _decompose_all(soup.select(",".join(_ALWAYS_DROP)))
-
-    # Same reasoning as comments: hidden from the reader, not from get_text().
     _decompose_all(soup.select("[hidden], [aria-hidden=true]"))
 
     _decompose_all(
@@ -319,15 +217,12 @@ def extract_page(html: str, *, base_url: str, max_links: int) -> PageText:
     if soup.title is not None and soup.title.string is not None:
         title = strip_unsafe_characters(str(soup.title.string)).strip()
 
-    # Links are collected BEFORE chrome is dropped: navigation links are
-    # often the useful ones on an index page, even though the nav text is not.
+    # Links first: nav links help on index pages.
     links = _collect_links(soup, base_url=base_url, max_links=max_links)
 
     main = soup.select_one(_MAIN_SELECTORS)
 
     if main is not None:
-        # The page identifies its own content, so everything outside it is
-        # noise -- including the otherwise-ambiguous <aside> and <header>.
         root = main
         _decompose_all(root.select(",".join(_CHROME_DROP + _AMBIGUOUS_DROP)))
     else:
@@ -336,11 +231,6 @@ def extract_page(html: str, *, base_url: str, max_links: int) -> PageText:
 
     text = _collapse_blank_lines(strip_unsafe_characters(root.get_text("\n")))
 
-    # Never hand back an empty page when there was content to show. A layout
-    # that puts everything inside <nav>, or an <article> holding only a
-    # header, would otherwise have the model report the page as blank. Falling
-    # back to the never-prose set alone keeps context economy the default
-    # while making a blank result impossible.
     if not text:
         fallback = BeautifulSoup(html, "html.parser")
 
@@ -357,12 +247,7 @@ def extract_page(html: str, *, base_url: str, max_links: int) -> PageText:
 
 
 def _collect_links(soup: BeautifulSoup, *, base_url: str, max_links: int) -> list[str]:
-    """Collect absolute https links, deduplicated and capped.
-
-    Links are gathered so the model can navigate onward, but they are
-    reported as a separate section rather than inline -- inline they are both
-    noise and a place to hide a misleading label.
-    """
+    """Collect absolute https links, deduplicated and capped."""
 
     seen: set[str] = set()
     links: list[str] = []
@@ -375,8 +260,7 @@ def _collect_links(soup: BeautifulSoup, *, base_url: str, max_links: int) -> lis
 
         absolute = urljoin(base_url, strip_unsafe_characters(href).strip())
 
-        # Only https survives: a result must never hand the model a
-        # javascript:, data: or file: URL.
+        # https only: never hand the model javascript: or file: URLs.
         if urlparse(absolute).scheme != "https":
             continue
 
@@ -393,20 +277,9 @@ def _collect_links(soup: BeautifulSoup, *, base_url: str, max_links: int) -> lis
 
 
 def neutralise_delimiters(text: str, *marks: str) -> str:
-    """Break any occurrence of a delimiter inside untrusted content.
+    """Break any occurrence of a delimiter inside untrusted content."""
 
-    Without this a page can simply emit the closing marker and continue in
-    what looks like the server's own voice. A zero-width space would be
-    invisible but strip_unsafe_characters removes those, so a visible
-    interruption is used instead.
-
-    Args:
-        text: Untrusted text about to be wrapped.
-        marks: Delimiter strings to neutralise.
-
-    Returns:
-        The text with each delimiter broken up.
-    """
+    # A page emitting the marker would read as the server's voice.
 
     for mark in marks:
         if mark and mark in text:

@@ -1,18 +1,4 @@
-"""Parse compiler, linker and build-system output into structured diagnostics.
-
-Why this module exists: `run_powershell("cmake --build .")` already works, but
-it returns up to 64 KB of raw log. A C++ game project routinely emits hundreds
-of warnings, a single template error can run fifty lines, and MSVC repeats a
-bad header's error once per translation unit. For a 7B-9B model that log IS
-the context window, and the three lines that matter are buried in it.
-
-So the tools here run the build and return only what a caller can act on:
-unique errors first, deduplicated with a repeat count, capped, warnings after,
-and -- crucially -- a tail of raw output whenever nothing could be parsed, so
-an unrecognised failure is never reported as success.
-
-Pure functions: text in, diagnostics out. No subprocess, no filesystem.
-"""
+"""Parse compiler, linker and build-system output into structured diagnostics."""
 
 from __future__ import annotations
 
@@ -28,35 +14,16 @@ __all__: list[str] = [
     "parse_rebuild_kind",
 ]
 
-# Maximum diagnostics reproduced in a report. Past this the model has plenty
-# to work on, and a 400-error build is one root cause anyway.
 MAX_ERRORS_SHOWN = 20
 MAX_WARNINGS_SHOWN = 10
 
-# Notes shown per error. clang attaches "candidate function not viable" notes
-# to overload failures, which are the most useful thing in the log -- but a
-# failed template instantiation can attach fifty, which is pure noise.
 MAX_NOTES_PER_ERROR = 2
 
-# Raw lines shown when nothing parsed. Build failures announce themselves at
-# the END of the log, so this is a tail, not a head.
 MAX_RAW_TAIL_LINES = 25
 
-# Display cap on one message. Applied at render time, not at parse time, so
-# the deduplication key stays the full text and two errors differing only past
-# the cap do not merge.
-#
-# Not defensive: a real MSVC template error prints the fully expanded type,
-# which runs to thousands of characters, and a CMake find_package failure with
-# its candidate filenames comfortably exceeds 500. Twenty of those is the
-# entire context window of the model this server targets.
+# Applied at render time, so the dedup key stays full.
 MAX_MESSAGE_CHARS = 500
 
-# Directory names that mark a warning as coming from code the caller does not
-# own. C4996 deprecation and LNK4099 missing-PDB warnings are the classic
-# third-party noise a C++ game produces, and a vendored path is the other clear
-# signal -- so they are labelled "likely pre-existing" rather than left looking
-# like something the model just introduced.
 _VENDORED_PATH_PARTS = frozenset(
     {
         "deps",
@@ -74,36 +41,17 @@ _VENDORED_PATH_PARTS = frozenset(
 
 _KNOWN_BENIGN_CODES = frozenset({"C4996", "LNK4099"})
 
-# ninja's progress token, "[12/345]". Present exactly when it is compiling or
-# linking something, which is what tells an incremental build from a no-op.
+# Present exactly when ninja compiles or links.
 _NINJA_PROGRESS_PATTERN = re.compile(r"\[\d+/\d+\]")
 
-# MSBuild at /v:minimal prints a bare source path for each file it compiles
-# ("  renderer.cpp"), with no "->" and no .obj suffix -- the arrow appears only
-# on the link line. Without this a compile-only incremental build would look
-# like a no-op. A bare path ending in a C/C++ extension is otherwise unusual in
-# a build log, and matching it can only turn "" into "incremental", never the
-# dangerous "up-to-date".
+# Matching only turns "" into incremental, never up-to-date.
 _SOURCE_FILE_PATTERN = re.compile(r"\S+\.(?:c|cc|cpp|cxx|m|mm)$", re.IGNORECASE)
 
 
 class Diagnostic(NamedTuple):
-    """One compiler, linker or build-system message.
+    """One compiler, linker or build-system message."""
 
-    Attributes:
-        file: Source path as reported, normalised to forward slashes, or ""
-            for messages with no location (many linker and CMake errors).
-        line: 1-based line, or None when the tool did not report one.
-        column: 1-based column, or None.
-        severity: "error", "warning" or "note".
-        code: Tool-specific code such as "C2065", "LNK2019" or "X3004".
-            Empty for clang and CMake, which do not emit codes.
-        message: The message text, with MSVC's trailing project tag removed.
-        notes: Related "note:" lines, already capped.
-        occurrences: How many times this exact diagnostic appeared.
-            Named 'occurrences' rather than 'count' because NamedTuple
-            inherits tuple.count(), and shadowing it is a type error.
-    """
+    # occurrences, not count: NamedTuple inherits tuple.count().
 
     file: str
     line: int | None
@@ -116,15 +64,7 @@ class Diagnostic(NamedTuple):
 
 
 class ParsedOutput(NamedTuple):
-    """Everything extracted from one build log.
-
-    Attributes:
-        errors: Unique errors, first-seen order.
-        warnings: Unique warnings, first-seen order.
-        total_errors: Errors including duplicates.
-        total_warnings: Warnings including duplicates.
-        unparsed: Lines no pattern matched, for the raw-tail fallback.
-    """
+    """Everything extracted from one build log."""
 
     errors: tuple[Diagnostic, ...]
     warnings: tuple[Diagnostic, ...]
@@ -133,8 +73,6 @@ class ParsedOutput(NamedTuple):
     unparsed: tuple[str, ...]
 
 
-# MSVC's cl.exe, fxc.exe and MSBuild all use file(line,col): sev CODE: msg.
-# The optional column is real -- older MSVC and some tools emit file(line).
 _MSVC_PATTERN = re.compile(
     r"^\s*(?P<file>(?:[A-Za-z]:)?[^(]+?)"
     r"\((?P<line>\d+)(?:,(?P<column>\d+))?\)"
@@ -142,30 +80,21 @@ _MSVC_PATTERN = re.compile(
     r"\s+(?P<code>[A-Za-z]+\d+)\s*:\s*(?P<message>.*)$"
 )
 
-# Linker messages carry no line number: "main.obj : error LNK2019: ...".
-# The file group tolerates a leading drive letter so "C:\x\main.obj" is not
-# split at the drive colon.
 _MSVC_NO_LINE_PATTERN = re.compile(
     r"^\s*(?P<file>(?:[A-Za-z]:)?[^:]*?)"
     r"\s*:\s*(?P<severity>fatal error|error|warning)"
     r"\s+(?P<code>[A-Za-z]+\d+)\s*:\s*(?P<message>.*)$"
 )
 
-# clang, gcc, dxc and glslc: file:line:col: sev: msg. The non-greedy file
-# group backtracks correctly over a Windows drive letter, because "\" after
-# "C:" is not a digit run.
 _CLANG_PATTERN = re.compile(
     r"^\s*(?P<file>.+?):(?P<line>\d+)(?::(?P<column>\d+))?"
     r":\s*(?P<severity>fatal error|error|warning|note):\s*(?P<message>.*)$"
 )
 
-# glslangValidator: "ERROR: shader.frag:5: '' : syntax error"
 _GLSLANG_PATTERN = re.compile(
     r"^\s*(?P<severity>ERROR|WARNING):\s*(?P<file>.+?):(?P<line>\d+):\s*(?P<message>.*)$"
 )
 
-# CMake: "CMake Error at CMakeLists.txt:12 (find_package):" with the message
-# on the following indented lines.
 _CMAKE_LOCATED_PATTERN = re.compile(
     r"^CMake (?P<severity>Error|Warning)(?: \(dev\))? at "
     r"(?P<file>.+?):(?P<line>\d+)\s*(?:\((?P<code>\w+)\))?\s*:\s*$"
@@ -175,17 +104,12 @@ _CMAKE_BARE_PATTERN = re.compile(
     r"^CMake (?P<severity>Error|Warning)(?: \(dev\))?\s*:\s*(?P<message>.*)$"
 )
 
-# ninja's own failures, and a bare "error: msg" from a tool that reported no
-# file (dxc does this for command-line problems).
 _NINJA_PATTERN = re.compile(r"^ninja:\s*(?P<message>.*(?:error|stopped).*)$")
 
 _BARE_PATTERN = re.compile(
     r"^\s*(?P<severity>fatal error|error|warning):\s*(?P<message>.+)$"
 )
 
-# MSBuild appends the owning project to every line:
-#   "... undeclared identifier [C:\proj\game.vcxproj]"
-# It is identical on every line from that project, so it is pure noise.
 _PROJECT_TAG_PATTERN = re.compile(r"\s*\[[^\]]*\.(?:vcx|cs|fs|vb)proj\]\s*$")
 
 
@@ -204,12 +128,7 @@ def _normalise_severity(raw: str) -> str:
 
 
 def _relative_to(file: str, base: Path | None) -> str:
-    """Shorten an absolute path against the build directory.
-
-    Compilers report absolute paths; "src/renderer/device.cpp" costs a
-    fraction of the tokens of the same path under a deep checkout, and is
-    what the caller needs to pass to read_file anyway.
-    """
+    """Shorten an absolute path against the build directory."""
 
     if not file:
         return ""
@@ -223,8 +142,7 @@ def _relative_to(file: str, base: Path | None) -> str:
             if candidate.is_absolute():
                 text = str(candidate.relative_to(base))
         except (ValueError, OSError):
-            # Different drive, or not under base. Keep the absolute path:
-            # a wrong relative path is worse than a long correct one.
+            # A wrong relative path is worse than a long correct one.
             pass
 
     return text.replace("\\", "/")
@@ -243,12 +161,9 @@ def _to_int(value: str | None) -> int | None:
 
 
 def _match_line(line: str, base: Path | None) -> Diagnostic | None:
-    """Try every pattern against one line, most specific first.
+    """Try every pattern against one line, most specific first."""
 
-    Order matters. _MSVC_NO_LINE_PATTERN and _BARE_PATTERN are permissive
-    enough to swallow lines the earlier patterns parse properly, so they come
-    last.
-    """
+    # Permissive patterns would swallow precise matches.
 
     stripped = _PROJECT_TAG_PATTERN.sub("", line.rstrip())
 
@@ -345,22 +260,8 @@ def _match_line(line: str, base: Path | None) -> Diagnostic | None:
 def parse_build_output(
     text: str, *, base_directory: Path | None = None
 ) -> ParsedOutput:
-    """Extract deduplicated diagnostics from a build log.
+    """Extract deduplicated diagnostics from a build log."""
 
-    Deduplication is the point, not a nicety. A broken header included by
-    forty translation units produces forty identical errors, which would fill
-    the report with one problem restated. Identical diagnostics collapse to
-    one entry carrying a count.
-
-    Args:
-        text: Combined stdout and stderr from the build.
-        base_directory: Build directory, used to shorten absolute paths.
-
-    Returns:
-        The parsed diagnostics, plus the lines nothing matched.
-    """
-
-    # Key -> index into `order`, so first-seen ordering survives dedup.
     seen: dict[tuple[str, int | None, int | None, str, str, str], int] = {}
     order: list[Diagnostic] = []
     unparsed: list[str] = []
@@ -368,14 +269,12 @@ def parse_build_output(
     total_errors = 0
     total_warnings = 0
 
-    # Index of the last error/warning, so a following "note:" attaches to it.
     last_real = -1
 
     pending_cmake: Diagnostic | None = None
     cmake_message: list[str] = []
 
     def flush_cmake() -> None:
-        """Emit a CMake diagnostic once its indented message is collected."""
 
         nonlocal pending_cmake, total_errors, total_warnings, last_real
 
@@ -434,12 +333,7 @@ def parse_build_output(
             continue
 
         if pending_cmake is not None:
-            # CMake's message is the indented block that follows. Blank lines
-            # do NOT end it: a find_package failure separates its prose from
-            # the list of candidate config filenames with an empty line, and
-            # treating that as the terminator drops the filenames -- which are
-            # the actionable half of the message. Only a non-blank line at
-            # column zero ends the block.
+            # Only a non-blank line at column zero ends the block.
             if not line.strip() or line.startswith(("  ", "\t")):
                 cmake_message.append(line)
                 continue
@@ -511,14 +405,7 @@ def parse_build_output(
 
 
 def _pre_existing(diagnostic: Diagnostic) -> bool:
-    """Whether a warning probably predates the caller's current edit.
-
-    Deliberately a hint rather than a verdict: C4996 (deprecation) and
-    LNK4099 (missing PDB) are the classic third-party noise in a C++ game,
-    and a vendored path is the other signal, but the server cannot know a
-    project's directory layout for certain. Applied to warnings only -- an
-    error in a vendored header is still something to look at.
-    """
+    """Whether a warning probably predates the caller's current edit."""
 
     if diagnostic.code in _KNOWN_BENIGN_CODES:
         return True
@@ -532,14 +419,7 @@ def _pre_existing(diagnostic: Diagnostic) -> bool:
 
 
 def _warning_histogram(warnings: tuple[Diagnostic, ...]) -> str:
-    """Summarise warnings as one line, e.g. "C4996 x7 (deps) | LNK4099 x2".
-
-    Grouped by code so a build with two hundred warnings becomes a handful of
-    counts instead of two hundred lines, in the same spirit as the error
-    deduplication. The directory is the top path component of the group's most
-    common file, which is enough to tell "deps/" from "src/" without spending
-    a full path on it.
-    """
+    """Summarise warnings as one line, e.g. "C4996 x7 (deps) | LNK4099 x2"."""
 
     if not warnings:
         return ""
@@ -549,8 +429,6 @@ def _warning_histogram(warnings: tuple[Diagnostic, ...]) -> str:
     order: list[str] = []
 
     for diagnostic in warnings:
-        # clang and CMake emit no code; without the message fallback a whole
-        # group would collapse under an empty key.
         key = diagnostic.code or diagnostic.message
 
         if key not in counts:
@@ -570,8 +448,7 @@ def _warning_histogram(warnings: tuple[Diagnostic, ...]) -> str:
 
     parts: list[str] = []
 
-    # Highest counts first; ties keep first-seen order because sorted() is
-    # stable even with reverse=True.
+    # sorted() is stable, so ties keep first-seen order.
     for key in sorted(order, key=lambda item: counts[item], reverse=True):
         label = f"{key} x{counts[key]}"
 
@@ -585,20 +462,9 @@ def _warning_histogram(warnings: tuple[Diagnostic, ...]) -> str:
 
 
 def parse_rebuild_kind(raw_output: str) -> str:
-    """Infer what a build actually did: up-to-date, incremental or full.
+    """Infer what a build actually did: up-to-date, incremental or full."""
 
-    Marker-based on purpose. A wrong "up-to-date" is a claim the model acts
-    on -- it may skip a build it needed -- so an unrecognised log returns ""
-    rather than a guess. The full-rebuild markers are checked before the soft
-    "Build succeeded" up-to-date signal for the same reason: a truncated log
-    that happens to contain no compile lines must not be read as a no-op.
-
-    Args:
-        raw_output: Combined stdout and stderr from the build.
-
-    Returns:
-        "up-to-date", "incremental", "full", or "" when unsure.
-    """
+    # Fail closed: an unrecognised log returns "", never a guess.
 
     lowered = raw_output.lower()
 
@@ -632,8 +498,7 @@ def parse_rebuild_kind(raw_output: str) -> str:
 def _has_compile_activity(line: str) -> bool:
     """Whether one log line is a compiler or linker doing work."""
 
-    # MSBuild prints "Project.vcxproj -> out.exe" only when the link actually
-    # ran, and ninja/gcc-style lines use the same arrow for object output.
+    # The arrow appears only when the link actually ran.
     if "-> " in line:
         return True
 
@@ -647,13 +512,7 @@ def _has_compile_activity(line: str) -> bool:
 
 
 def _format_one(diagnostic: Diagnostic, *, is_warning: bool = False) -> list[str]:
-    """Render one diagnostic as report lines.
-
-    Args:
-        diagnostic: The diagnostic to render.
-        is_warning: True when rendering a warning, which is what allows the
-            "[likely pre-existing]" hint. Errors are never tagged.
-    """
+    """Render one diagnostic as report lines."""
 
     location = diagnostic.file or "(no file)"
 
@@ -698,32 +557,7 @@ def format_report(
     rebuild: str = "",
     full_log: Path | None = None,
 ) -> str:
-    """Render a parsed build log as the tool's plain-text result.
-
-    Args:
-        parsed: Output of parse_build_output.
-        header: First line, naming what ran.
-        exit_code: Process exit status.
-        raw_output: Combined output, for the fallback tail.
-        subject: Word used in the verdict lines. compile_shader passes
-            "COMPILE" so a shader failure does not report "BUILD FAILED",
-            which reads as though the whole project failed.
-        success_line: Replaces the default "<subject> SUCCEEDED" verdict.
-            Used to name the artefact that was produced.
-        elapsed_ms: Wall-clock duration in milliseconds, shown on the header
-            line. Omitted when None so callers that do not measure (a bare
-            compile_shader invocation) keep the shorter header.
-        rebuild: "up-to-date", "incremental", "full" or "" from
-            parse_rebuild_kind. When non-empty it is printed under the header
-            so the model can tell a real build from a no-op.
-        full_log: Path to the retained full output, printed under the header.
-            Set when the report is a truncated summary, so the untruncated log
-            stays reachable instead of the summary becoming a dead end.
-
-    Returns:
-        The report. Never empty, and never claims success on a non-zero exit
-        it could not explain.
-    """
+    """Render a parsed build log as the tool's plain-text result."""
 
     if elapsed_ms is None:
         lines = [f"{header}  (exit code {exit_code})"]
@@ -793,9 +627,7 @@ def format_report(
         return "\n".join(lines)
 
     if not parsed.errors:
-        # The critical case: the build failed and no pattern matched. Saying
-        # "no errors" here would be a lie the model acts on, so show the tail
-        # of the real output instead.
+        # Fail closed: never report "no errors" on a failed build.
         tail = [item for item in raw_output.splitlines() if item.strip()]
         tail = tail[-MAX_RAW_TAIL_LINES:]
 

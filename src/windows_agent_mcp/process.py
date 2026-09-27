@@ -1,10 +1,4 @@
-"""Subprocess execution shared by the tools that run external programs.
-
-run_powershell, build_project and compile_shader all need the same two
-things: a Windows environment whose PATH reflects reality, and a bounded
-capture of a child process's output. Both live here so the three tools cannot
-drift apart on encoding, timeout or truncation behaviour.
-"""
+"""Subprocess execution shared by the tools that run external programs."""
 
 from __future__ import annotations
 
@@ -25,33 +19,17 @@ __all__: list[str] = [
     "run_process",
 ]
 
-# Per-stream cap on captured output. Build logs are unbounded; this keeps one
-# noisy compile from filling the context window.
 MAX_PROCESS_OUTPUT_CHARS: int = 64 * 1024
 
-# Budget for the tail kept when a stream exceeds MAX_PROCESS_OUTPUT_CHARS.
-# A build's last lines are the part that says why it failed or stopped, and
-# for a timed-out build the tail is the whole point -- so the cap keeps both
-# ends and drops the middle rather than keeping only the head.
 MAX_PROCESS_OUTPUT_TAIL_CHARS: int = 16 * 1024
 
-# Bound on the taskkill call itself, so a wedged kill cannot hang the tool.
 PROCESS_KILL_TIMEOUT_SECONDS: int = 10
 
 
 def get_windows_development_environment() -> dict[str, str]:
-    """Build a Windows environment using the current process environment plus the current machine/user PATH.
+    """Build a Windows environment with the current machine/user PATH."""
 
-    This matters because a process inherits PATH at launch and never sees
-    later changes: a Vulkan SDK or compiler installed after the server
-    started would otherwise be invisible to every tool that looks for it.
-
-    Returns:
-        Environment dictionary with merged and normalized PATH.
-
-    Raises:
-        Exception: If unable to reconstruct Windows environment (logged but not raised).
-    """
+    # Processes inherit PATH at launch and miss later installs.
 
     env = os.environ.copy()
 
@@ -73,7 +51,6 @@ def get_windows_development_environment() -> dict[str, str]:
         ) as key:
             user_path, _ = winreg.QueryValueEx(key, "Path")
 
-        # Windows normally combines these paths for processes.
         combined = os.pathsep.join(
             p
             for p in (
@@ -84,13 +61,8 @@ def get_windows_development_environment() -> dict[str, str]:
             if p
         )
 
-        # Expand variables such as:
-        # %SystemRoot%
-        # %ProgramFiles%
-        # %USERPROFILE%
         combined = os.path.expandvars(combined)
 
-        # Normalize entries and remove duplicates.
         normalized: list[str] = []
         seen: set[str] = set()
 
@@ -118,27 +90,7 @@ def get_windows_development_environment() -> dict[str, str]:
 
 
 class ProcessResult(NamedTuple):
-    """Outcome of a bounded subprocess run.
-
-    Attributes:
-        stdout: Captured stdout, truncated to MAX_PROCESS_OUTPUT_CHARS.
-        stderr: Captured stderr, truncated the same way.
-        exit_code: Process exit status. -1 when it timed out.
-        timed_out: True if the timeout fired.
-        combined: stdout and stderr joined, which is what the diagnostic
-            parsers want -- compilers split messages across both streams and
-            which one they use varies by tool and by platform.
-        pid: Child process ID, or None when the process never started. Kept
-            so a timed-out build can be reported back with the identity of
-            what was killed.
-        elapsed_ms: Wall-clock duration of the run in milliseconds, measured
-            around communicate(). Reported so a caller can tell a build that
-            finished in two seconds from one that ran for ten minutes.
-        log_path: Path to the full output when one was retained, else None.
-            Set only when the summary is truncated or the run timed out, so a
-            caller can page the untruncated log instead of being stuck with
-            the excerpt.
-    """
+    """Outcome of a bounded subprocess run."""
 
     stdout: str
     stderr: str
@@ -151,13 +103,7 @@ class ProcessResult(NamedTuple):
 
 
 def _truncate(text: str, label: str) -> str:
-    """Cap one stream, keeping both ends and saying what was dropped.
-
-    A build's actionable content is split across the two ends: the first lines
-    name the command and the last lines say why it stopped. Dropping only the
-    middle keeps both, so neither a head-only nor a tail-only capture can hide
-    the reason a build failed.
-    """
+    """Cap one stream, keeping both ends and saying what was dropped."""
 
     if len(text) <= MAX_PROCESS_OUTPUT_CHARS:
         return text
@@ -165,7 +111,6 @@ def _truncate(text: str, label: str) -> str:
     omitted = len(text) - MAX_PROCESS_OUTPUT_CHARS - MAX_PROCESS_OUTPUT_TAIL_CHARS
 
     if omitted <= 0:
-        # Only just over the limit: keep the tail, which is the actionable end.
         return f"...[{label} truncated]...\n" + text[-MAX_PROCESS_OUTPUT_CHARS:]
 
     return (
@@ -176,11 +121,7 @@ def _truncate(text: str, label: str) -> str:
 
 
 def _write_log(log_path: Path, text: str) -> Path | None:
-    """Write the full output, returning the path or None on failure.
-
-    Log retention must never fail the build it is describing, so an
-    OSError here is logged and swallowed.
-    """
+    """Write the full output, returning the path or None on failure."""
 
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -192,14 +133,9 @@ def _write_log(log_path: Path, text: str) -> Path | None:
 
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
-    """Kill a build and everything it spawned.
+    """Kill a build and everything it spawned."""
 
-    On Windows process.kill() == TerminateProcess on the direct child only.
-    msbuild's cl.exe and link.exe grandchildren survive that and keep writing
-    obj/ and .lib files, which is what produced the LNK1163/LNK1104 lock
-    errors a retry then misread as a source bug. taskkill /T walks the parent
-    tree, so it must run BEFORE the direct child is killed.
-    """
+    # taskkill /T runs before process.kill(): grandchildren hold obj/ locks.
 
     try:
         subprocess.run(
@@ -224,28 +160,7 @@ def run_process(
     timeout_seconds: int,
     log_path: Path | None = None,
 ) -> ProcessResult:
-    """Run a program directly, capturing bounded output.
-
-    No shell is involved: argv is passed through, so quoting and metacharacters
-    are not reinterpreted by a command processor. Callers that accept a
-    command string must validate it before splitting it into argv.
-
-    Args:
-        argv: Program and arguments.
-        cwd: Working directory, already validated by the caller.
-        timeout_seconds: Wall-clock limit.
-        log_path: Destination for the full output when it must be retained.
-            Written only when the summary is truncated or the run timed out;
-            an ordinary successful run leaves no file. Failures to write are
-            logged and ignored, never raised.
-
-    Returns:
-        The captured result. A timeout is reported, not raised, so the caller
-        can return a normal tool result.
-
-    Raises:
-        OSError: If the program cannot be started at all.
-    """
+    """Run a program directly, capturing bounded output."""
 
     started = time.monotonic()
 
@@ -267,9 +182,7 @@ def run_process(
     except subprocess.TimeoutExpired:
         timed_out = True
 
-        # Kill the tree before draining: the final communicate() blocks until
-        # the pipes close, and the grandchildren holding them open are exactly
-        # what taskkill is for.
+        # Kill before draining: grandchildren hold the pipes open.
         _terminate_process_tree(process)
 
         try:
@@ -277,9 +190,7 @@ def run_process(
                 timeout=PROCESS_KILL_TIMEOUT_SECONDS
             )
         except subprocess.TimeoutExpired:
-            # A grandchild that survived the kill -- taskkill failed, or it
-            # detached -- can hold the pipe open indefinitely. Bound the drain
-            # rather than hang the tool on a build that is already killed.
+            # Bound the drain: a surviving grandchild can hold the pipe open.
             log.warning(
                 "output pipe did not close after killing pid %s",
                 process.pid,
@@ -288,24 +199,16 @@ def run_process(
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
 
-    # communicate() returns None on a stream that was not captured, and the
-    # caller's parsers assume strings, so the default is applied here.
     stdout = stdout or ""
     stderr = stderr or ""
 
     full_combined = stdout + "\n" + stderr
 
-    # A timed-out process has no meaningful exit status, so it is reported as
-    # -1 rather than whatever TerminateProcess happened to leave behind.
     exit_code = -1
 
     if not timed_out and process.returncode is not None:
         exit_code = process.returncode
 
-    # Retain the full output only when the summary is actually truncated or the
-    # build was killed, so an ordinary successful build leaves no file. The
-    # untruncated text is written rather than `combined`, because the whole
-    # point of the log is that the excerpt is hiding something.
     kept_log: Path | None = None
 
     if log_path is not None and (

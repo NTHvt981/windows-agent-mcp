@@ -19,11 +19,7 @@ __all__: list[str] = ["edit_file"]
 
 
 def _dominant_newline(text: str) -> str:
-    """Return the line ending the file mostly uses.
-
-    Ties and empty files go to LF. A file with no newline at all also reports
-    LF, which is harmless: there is nothing to convert back.
-    """
+    """Return the line ending the file mostly uses."""
 
     crlf = text.count("\r\n")
 
@@ -39,41 +35,7 @@ def edit_file(
     new_string: str,
     replace_all: bool = False,
 ) -> str:
-    """Replace an exact string in an existing text file.
-
-    Preferred over write_file for changing existing code: only the named
-    region moves, so the rest of the file cannot be lost to a truncated
-    generation.
-
-    `old_string` must match EXACTLY, including indentation, and must be
-    unique in the file. If it appears more than once the edit is refused
-    rather than guessed at -- include a surrounding line or two to
-    disambiguate, or pass replace_all.
-
-    Line endings are handled for you: the file's own convention is detected
-    and preserved, and CRLF/LF differences between your strings and the file
-    are ignored when matching. So a CRLF file can be edited with plain "\\n"
-    strings and stays CRLF.
-
-    Edits are confined to the download root plus any directory listed in
-    WAMCP_PROJECT_ROOTS.
-
-    Args:
-        path: File to edit. Must already exist.
-        old_string: Exact text to find.
-        new_string: Text to replace it with. May be empty to delete.
-        replace_all: Replace every occurrence instead of requiring exactly
-            one. Defaults to false.
-
-    Returns:
-        A confirmation naming the file and what changed, or a structured JSON
-        error with recovery instructions.
-
-    Example:
-        >>> edit_file("src/main.cpp", "VK_FORMAT_B8G8R8A8_UNORM",
-        ...           "VK_FORMAT_B8G8R8A8_SRGB")
-        'EDITED: C:\\\\game\\\\src\\\\main.cpp (1 replacement at line 88)'
-    """
+    """Replace an exact string in an existing text file."""
 
     try:
         target = resolve_write_path(path)
@@ -194,10 +156,7 @@ def edit_file(
 
     newline = _dominant_newline(text)
 
-    # Match in LF space so the caller never has to know or guess the file's
-    # convention. Without this, editing a CRLF file with an LF old_string
-    # fails to match for reasons invisible in the tool output -- and the model
-    # then rewrites the whole file to work around it.
+    # Match in LF space so CRLF files match LF input.
     normalised = text.replace("\r\n", "\n")
     wanted = old_string.replace("\r\n", "\n")
     replacement = new_string.replace("\r\n", "\n")
@@ -241,8 +200,7 @@ def edit_file(
         updated = normalised.replace(wanted, replacement, 1)
         changed = 1
 
-    # 1-based line of the first change, computed before restoring CRLF so the
-    # count is not thrown off by the two-character ending.
+    # Count before restoring CRLF.
     first_line = normalised[: normalised.index(wanted)].count("\n") + 1
 
     if newline != "\n":

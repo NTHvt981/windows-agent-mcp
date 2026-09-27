@@ -1,10 +1,3 @@
-"""Tests for the one-build-per-directory registry.
-
-These exercise buildlock directly: the wiring into build_project lives in
-test_build_tools.py, so a failure here points at the registry rather than at
-the tool.
-"""
-
 from __future__ import annotations
 
 import time

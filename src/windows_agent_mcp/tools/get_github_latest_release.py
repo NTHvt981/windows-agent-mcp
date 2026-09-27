@@ -1,5 +1,3 @@
-"""GitHub latest release tool for Windows Agent MCP Server."""
-
 from __future__ import annotations
 
 import json
@@ -13,10 +11,7 @@ from ..utils import HTTP_OPENER, HTTP_TIMEOUT_SECONDS, MAX_HTTP_BYTES, validate_
 
 __all__: list[str] = ["get_github_latest_release"]
 
-# owner/repository. Dots are legal in GitHub names (a repo may even be called
-# ".github"), so they cannot simply be banned -- but a segment made ENTIRELY
-# of dots is a path traversal that would change the API URL requested, so each
-# segment must contain at least one non-dot character.
+# All-dot segments traverse; each segment needs a non-dot character.
 _SEGMENT = r"(?=[^/]*[A-Za-z0-9_-])[A-Za-z0-9_.-]+"
 
 GITHUB_REPO_PATTERN: re.Pattern[str] = re.compile(f"^{_SEGMENT}/{_SEGMENT}$")
@@ -25,23 +20,7 @@ GITHUB_REPO_PATTERN: re.Pattern[str] = re.compile(f"^{_SEGMENT}/{_SEGMENT}$")
 def get_github_latest_release(
     repository: str,
 ) -> str:
-    """Return the latest GitHub release metadata.
-
-    Example: premake/premake-core
-
-    This uses the GitHub API through the approved api.github.com domain.
-
-    Args:
-        repository: GitHub repository in format "owner/repository".
-
-    Returns:
-        JSON string containing release metadata, or a structured JSON error.
-        This tool never raises.
-
-    Example:
-        >>> get_github_latest_release("premake/premake")
-        '{"repository": "premake/premake", "tag": "v1.0.0", ...}',
-    """
+    """Return the latest GitHub release metadata."""
 
     if not GITHUB_REPO_PATTERN.fullmatch(repository):
         return mcp_error(
@@ -115,9 +94,7 @@ def get_github_latest_release(
 
             return json.dumps(result, indent=2)
 
-    # No `except ValueError` here on purpose: json.JSONDecodeError subclasses
-    # it, so catching ValueError would report a malformed API response as a
-    # refused URL, telling the caller to give up instead of retrying.
+    # No except ValueError: JSONDecodeError subclasses it.
     except Exception as exc:
         log.exception("get_github_latest_release failed")
 

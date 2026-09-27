@@ -1,10 +1,3 @@
-"""Tests for build_project's structured timeout and msbuild defaults.
-
-run_process is stubbed: these assert how the tool turns an outcome into an
-envelope and how it assembles argv, not whether a compiler happens to be
-installed on the machine running the suite.
-"""
-
 from __future__ import annotations
 
 import json
@@ -84,8 +77,6 @@ def test_second_build_for_the_same_directory_is_refused_while_one_runs(
         calls += 1
 
         if calls == 1:
-            # Re-enter while the outer build still holds the slot. This is the
-            # race the guard exists for: two tools building one obj/.
             captured["inner"] = build_project(
                 "cmake --build build", str(writable_project)
             )
@@ -135,16 +126,12 @@ def test_slot_is_released_after_a_timeout(
     )
 
     assert first["error"]["type"] == "BUILD_TIMED_OUT"
-    # A timeout ends the process, so the slot is free again: the second call
-    # must see a timeout, not a refusal.
     assert second["error"]["type"] == "BUILD_TIMED_OUT"
 
 
 def test_full_log_path_is_named_in_the_success_report(
     writable_project, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A truncated diagnostic summary must still point at the raw log."""
-
     retained = tmp_path / "build.log"
 
     def fake_run(argv, *, cwd, timeout_seconds, log_path=None):
