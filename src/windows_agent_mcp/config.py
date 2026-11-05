@@ -111,6 +111,22 @@ SETTINGS: dict[str, Setting] = {
             "usually you want the 'search' tool group plus a host grant."
         ),
     ),
+    "WAMCP_GUI": Setting(
+        default="unset (no desktop capture tools)",
+        description=(
+            "Set to 1 to register list_windows and capture_window (the 'gui' "
+            "tool group). 'all' does not include them: recording the desktop "
+            "is a separate consent decision."
+        ),
+    ),
+    "WAMCP_GUI_PROCESSES": Setting(
+        default="unset (no window may be captured)",
+        description=(
+            "Executables whose windows capture_window may read, ',' or ';' "
+            "separated. Executable NAMES, not paths. Default-deny: an unset "
+            "value means capture_window refuses every window."
+        ),
+    ),
     "WAMCP_SEARCH_BACKEND": Setting(
         default="duckduckgo",
         description=(

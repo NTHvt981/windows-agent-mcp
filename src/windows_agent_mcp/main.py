@@ -10,6 +10,7 @@ from typing import Any
 from .log import log
 from .server import mcp
 from .tools.build_project import build_project
+from .tools.capture_window import capture_window
 from .tools.compile_shader import compile_shader
 from .tools.download_file import download_file
 from .tools.edit_file import edit_file
@@ -22,6 +23,7 @@ from .tools.get_server_info import get_server_info
 from .tools.get_system_info import get_system_info
 from .tools.list_directory import list_directory
 from .tools.list_empty_dirs import list_empty_dirs
+from .tools.list_windows import list_windows
 from .tools.read_file import read_file
 from .tools.run_powershell import run_powershell
 from .tools.search_files import search_files
@@ -33,6 +35,7 @@ from .utils import (
     PROFILE_ENV_VAR,
     TOOL_GROUPS_ENV_VAR,
     active_tool_groups,
+    allowed_gui_processes,
 )
 
 __all__: list[str] = [
@@ -61,6 +64,8 @@ TOOLS: tuple[Callable[..., Any], ...] = (
     get_system_info,
     get_gpu_info,
     get_server_info,
+    list_windows,
+    capture_window,
     download_file,
     fetch_https_response,
     get_github_latest_release,
@@ -99,6 +104,10 @@ TOOL_GROUPS: dict[str, tuple[Callable[..., Any], ...]] = {
     ),
     "search": (web_search,),
     "research": (web_search,),
+    "gui": (
+        list_windows,
+        capture_window,
+    ),
 }
 
 
@@ -218,6 +227,13 @@ def posture_warnings(groups: frozenset[str]) -> list[str]:
             "the 'search' group is active but 'docs' is not, so web_search can "
             "find URLs that nothing can read. Add 'docs' to make results "
             "usable."
+        )
+
+    if "gui" in groups and not allowed_gui_processes():
+        messages.append(
+            "the 'gui' group is active but WAMCP_GUI_PROCESSES is empty, so "
+            "every capture_window call will be refused. Name the executable "
+            "to permit, e.g. WAMCP_GUI_PROCESSES=game.exe."
         )
 
     return messages

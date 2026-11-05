@@ -15,6 +15,8 @@ from ..hostgrants import (
 )
 from ..utils import (
     ALLOWED_DOC_HOSTS,
+    GUI_ENV_VAR,
+    GUI_PROCESSES_ENV_VAR,
     LAUNCH_CWD_ENV_VAR,
     MAX_DOWNLOAD_BYTES,
     MAX_HTTP_BYTES,
@@ -27,8 +29,10 @@ from ..utils import (
     WEB_RESEARCH_ENV_VAR,
     WORKSPACE_FROM_CWD_ENV_VAR,
     active_tool_groups,
+    allowed_gui_processes,
     get_allowed_working_directories,
     get_download_root,
+    gui_enabled,
     web_research_enabled,
     web_search_enabled,
     workspace_from_cwd,
@@ -59,6 +63,8 @@ def get_server_info() -> str:
     """Return information about this MCP server."""
 
     research = web_research_enabled()
+
+    gui = gui_enabled()
 
     granted, grants_error = granted_hosts()
 
@@ -143,6 +149,11 @@ def get_server_info() -> str:
             "workspace_note": workspace_note,
             "web_research": research,
             "web_research_env_var": WEB_RESEARCH_ENV_VAR,
+            "gui_enabled": gui,
+            "gui_processes": sorted(allowed_gui_processes()) if gui else [],
+            "gui_capture_policy": "allowlist (WAMCP_GUI_PROCESSES); default deny",
+            "gui_env_var": GUI_ENV_VAR,
+            "gui_processes_env_var": GUI_PROCESSES_ENV_VAR,
             "documentation_hosts": sorted(ALLOWED_DOC_HOSTS),
             "granted_hosts": sorted(granted),
             "granted_hosts_file": str(find_grants_file()),

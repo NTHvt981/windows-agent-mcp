@@ -104,19 +104,29 @@ VALID_TOOL_GROUPS: frozenset[str] = frozenset(
         "net",
         "search",
         "research",
+        "gui",
     }
 )
 
 DEFAULT_TOOL_GROUPS: frozenset[str] = VALID_TOOL_GROUPS - {
     "research",
     "search",
+    "gui",
 }
 
 ALWAYS_ON_TOOL_GROUPS: frozenset[str] = frozenset({"core"})
 
+# Not part of 'all': recording the desktop is a different consent decision
+# from file and network access (see GUI_CAPTURE notes in README.md).
+OPT_IN_TOOL_GROUPS: frozenset[str] = frozenset({"gui"})
+
 _ALL_GROUPS_KEYWORD = "all"
 
 WEB_RESEARCH_ENV_VAR: str = "WAMCP_WEB_RESEARCH"
+
+GUI_ENV_VAR: str = "WAMCP_GUI"
+
+GUI_PROCESSES_ENV_VAR: str = "WAMCP_GUI_PROCESSES"
 
 SEARCH_BACKEND_ENV_VAR: str = "WAMCP_SEARCH_BACKEND"
 
@@ -136,7 +146,9 @@ def parse_tool_groups(value: str | None) -> tuple[frozenset[str], str | None]:
         return DEFAULT_TOOL_GROUPS, None
 
     if _ALL_GROUPS_KEYWORD in requested:
-        return VALID_TOOL_GROUPS, None
+        # 'all' deliberately excludes gui: desktop capture is a separate
+        # consent decision, never a side effect of wanting everything.
+        return VALID_TOOL_GROUPS - OPT_IN_TOOL_GROUPS, None
 
     unknown = sorted({part for part in requested if part not in VALID_TOOL_GROUPS})
 
@@ -160,6 +172,21 @@ def active_tool_groups() -> tuple[frozenset[str], str | None]:
     if os.environ.get(WEB_RESEARCH_ENV_VAR, "").strip().lower() in _TRUTHY_VALUES:
         groups = groups | {"research"}
 
+    if os.environ.get(GUI_ENV_VAR, "").strip().lower() in _TRUTHY_VALUES:
+        groups = groups | {"gui"}
+    elif "gui" in groups:
+        # A requested-but-ungated gui group would register tools that every
+        # call of which errors out: say why, in one place, instead.
+        groups = groups - {"gui"}
+
+        message = (
+            "gui tools were requested but WAMCP_GUI is not set; desktop "
+            "capture stays off. Set WAMCP_GUI=1 to enable it, and list "
+            "permitted executables in WAMCP_GUI_PROCESSES."
+        )
+
+        error = f"{error} {message}" if error else message
+
     return groups, error
 
 
@@ -173,6 +200,41 @@ def web_research_enabled() -> bool:
     """Return True when research mode is on."""
 
     return "research" in active_tool_groups()[0]
+
+
+def gui_enabled() -> bool:
+    """Return True when the gui tool group is armed."""
+
+    return "gui" in active_tool_groups()[0]
+
+
+def allowed_gui_processes() -> frozenset[str]:
+    """Executables whose windows may be captured; empty means deny all."""
+
+    raw = os.environ.get(GUI_PROCESSES_ENV_VAR, "")
+
+    processes: set[str] = set()
+
+    for part in raw.replace(";", ",").replace("\r", "\n").replace("\n", ",").split(","):
+        part = part.strip().strip('"').strip()
+
+        if not part:
+            continue
+
+        processes.add(os.path.basename(part).lower())
+
+    return frozenset(processes)
+
+
+def gui_process_allowed(process: str) -> bool:
+    """Whether a window owned by ``process`` may be captured."""
+
+    listed = allowed_gui_processes()
+
+    if not listed:
+        return False
+
+    return os.path.basename(process).lower() in listed
 
 
 # DuckDuckGo rejects non-browser User-Agents with a 202 page.

@@ -5,6 +5,7 @@ REM
 REM    run_server.bat              start the server over stdio
 REM    run_server.bat --dev        start it under the MCP Inspector
 REM    run_server.bat --web        enable the web research tools
+REM    run_server.bat --gui        enable the window capture tools
 REM    run_server.bat --dev --web  both
 REM
 REM    run_server.bat --allow-host docs.example.com
@@ -26,6 +27,7 @@ pushd "%~dp0"
 
 set "DEV="
 set "WEB="
+set "GUI="
 set "TOOLS="
 set "PROFILE="
 set "ALLOW_HOSTS="
@@ -39,6 +41,11 @@ if /I "%~1"=="--dev" (
 )
 if /I "%~1"=="--web" (
     set "WEB=1"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="--gui" (
+    set "GUI=1"
     shift
     goto parse_args
 )
@@ -127,6 +134,18 @@ if defined WEB (
     echo        fetch_web_page may now reach any public HTTPS host instead of
     echo        documentation sites only. Fetched pages are untrusted input,
     echo        and this is an outbound channel. See README.md.
+    echo.
+)
+
+if defined GUI (
+    set "WAMCP_GUI=1"
+    echo [info] GUI tools ENABLED -- list_windows and capture_window are
+    echo        registered. Capture is refused for any executable not named
+    echo        in WAMCP_GUI_PROCESSES; name one to permit it, e.g.
+    echo            set WAMCP_GUI_PROCESSES=game.exe
+    echo        for this run. Reading screen contents only -- no input is
+    echo        ever sent to any window. See README.md.
+    echo.
 )
 
 if not defined ALLOW_HOSTS goto hosts_done
@@ -272,7 +291,7 @@ echo         Install Node.js, or run without --dev.
 goto fail
 
 :usage
-echo Usage: run_server.bat [--dev] [--web] [--tools GROUPS]
+echo Usage: run_server.bat [--dev] [--web] [--gui] [--tools GROUPS]
 echo                       [--profile NAME] [--allow-host HOSTS]
 echo.
 echo   --dev    Run under the MCP Inspector (needs Node.js/npx). Gives you a
@@ -283,6 +302,11 @@ echo            "Web research" section of README.md before using this.
 echo            Usually you want less: --tools core,docs,search registers
 echo            web_search WITHOUT widening which hosts may be read, and
 echo            --allow-host below opens just the sites you need.
+echo   --gui    Set WAMCP_GUI=1, which registers list_windows and
+echo            capture_window. capture_window is refused for any
+echo            executable not named in WAMCP_GUI_PROCESSES; reading a
+echo            window can see passwords, so the allowlist is per name.
+echo            Read the "Desktop Capture" section of README.md first.
 echo   --tools  Comma-separated tool groups to register. Fewer tools means
 echo            more context left for the model to work in. Groups:
 echo              core      always on: read, list, find, search, info
@@ -297,8 +321,12 @@ echo                        widening which hosts it may read. Pair it
 echo                        with docs; alone it finds pages nothing can
 echo                        open, and startup will say so.
 echo              research  web_search, and any-public-host fetching
-echo              all       every group
-echo            Omit to register everything except search and research.
+echo              gui       list_windows, capture_window. Refused per
+echo                        executable unless named in
+echo                        WAMCP_GUI_PROCESSES; NOT part of 'all'
+echo              all       every group except gui
+echo            Omit to register everything except search, research
+echo            and gui.
 echo            Examples: --tools edit,build,docs
 echo                      --tools core,docs,search
 echo   --profile  Named profile from input\config.json, which is a
