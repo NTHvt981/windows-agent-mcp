@@ -11,6 +11,7 @@ def _isolate_server_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "WAMCP_PROFILE",
         "WAMCP_WEB_RESEARCH",
         "WAMCP_GUI",
+        "WAMCP_GUI_INPUT",
         "WAMCP_GUI_PROCESSES",
         "WAMCP_PROJECT_ROOTS",
         "WAMCP_WORKSPACE_FROM_CWD",
