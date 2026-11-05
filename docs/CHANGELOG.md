@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The `gui` tool group — `list_windows` and `capture_window`, opt-in via
+  `WAMCP_GUI=1`, and deliberately **excluded from `all`**. Desktop window
+  capture can read anything visible in a window (including passwords behind
+  masked fields), so it is a consent decision on its own rather than a side
+  effect of asking for every file and network tool. The group is capture
+  only: no input injection exists, no window is focused, nothing is clicked.
+
+  Why capture at all instead of a full-desktop screenshot tool: an agent
+  working a game or a windowed app needs *that* window's pixels fresh each
+  turn, and capturing per-window keeps the operator's other monitors out of
+  reach. Mechanically it uses `PrintWindow` with `PW_RENDERFULLCONTENT`,
+  which renders even a fully occluded window — measured 14–34 ms per capture
+  on Phase 0 probes, following resize, with no focus change. A minimized
+  window has no rendered frame, so capture of one is refused until the caller
+  passes `restore=True` (the tool's entire ability to disturb a window).
+
+  The second gate, `WAMCP_GUI_PROCESSES`, is an executable-name allowlist,
+  default-deny. Capturing is such a cheap tool call that the boundary needs
+  to live somewhere a name can carry it: the *allowlist* names which
+  programs' screens may be read, and that default deny is what makes an
+  accidental `WAMCP_GUI=1` harmless rather than quietly a screen reader.
+  Output goes to `<download_root>/captures/`, atomically, already that
+  server's single writable-by-default place; the tool returns the file's
+  path, not the image, so a scan-sized PNG never lands in the context
+  window unasked.
+
 - `WAMCP_LAUNCH_CWD` — the launcher records the directory it was started in.
   `run_server.bat` `pushd`'s to the server's own directory (to find its
   `.venv`), so by the time Python runs, `Path.cwd()` is the *install* directory,

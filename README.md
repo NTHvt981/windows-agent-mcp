@@ -40,6 +40,16 @@ Registered **only** when `WAMCP_WEB_RESEARCH=1`. See
 [Web research](#web-research) before enabling.
 - `web_search` - Search the web for titles, URLs and snippets
 
+### Desktop Capture (opt-in)
+Registered **only** when `WAMCP_GUI=1`, and never as part of `all`. See the
+[Window Capture](#window-capture) security note before enabling.
+- `list_windows` - List visible top-level windows with per-window capture
+  permission
+- `capture_window` - Capture an allowlisted window's client area to a PNG
+  file under `<download root>/captures/`, returning the path. Read-only: no
+  input is ever sent to a window. A minimized window must first be restored
+  (`restore=True`).
+
 ### Introspection Tools
 - `get_server_info` - Server configuration, writable roots and network policy
 - `get_system_info` - OS, architecture and Python version
@@ -110,6 +120,26 @@ Registered **only** when `WAMCP_WEB_RESEARCH=1`. See
 > contains, and `npx`/`pip` fetch and execute third-party packages. So it is
 > a real boundary on *what program starts*, not a sandbox. For untrusted
 > input, use VM or container isolation.
+
+### Window Capture
+
+`capture_window` can read anything visible inside a window it captures —
+text, images, **passwords shown in a masked field**, recovery codes, chat
+content. It is a screen-reading grant, not an automation grant:
+
+- The `gui` tool group is **opt-in** (`WAMCP_GUI=1`) and **excluded from
+  `all`**: desktop capture is a different consent decision from file and
+  network access, so wanting "everything" is never enough to arm it.
+- A per-executable allowlist, `WAMCP_GUI_PROCESSES`, decides which
+  applications' windows may be captured. It is **default-deny**: unset, no
+  window is capturable. Names, not paths, because the trust question is
+  "which program's screen may I read", not "where does it live on disk".
+- **No input is sent.** The group is capture only: nothing focuses a window,
+  clicks or types. The tool may restore a minimized window (`restore=True`)
+  and that is the entire extent of its influence over other windows.
+- Capture output is written **only** under the download root
+  (`<download_root>/captures/`), atomically, next to every other artifact
+  this server writes.
 
 ### What the boundaries do not cover
 
@@ -704,19 +734,75 @@ interpreters the raw value is simply wrong.
 
 ---
 
+### `list_windows()`
+
+List visible top-level windows and whether each may be captured. **Requires
+`WAMCP_GUI=1`** — otherwise the tool is not registered at all.
+
+**Parameters:** None
+
+**Returns:** JSON with one entry per window: `hwnd`, `pid`, `process`
+(executable name), `title`, window `rect`, `client` size, `minimized`,
+`foreground` and `capture_allowed`. Plus the `capture_allowed_processes`
+allowlist and a one-line `policy` statement. `truncated: true` appears when
+the 100-window cap was hit. Title-less windows smaller than 100 px (taskbar
+strips and other shell helpers) are omitted.
+
+Entries are in z-order. Titles are informational only — never use a title as
+an identifier, since many applications (raylib included) share one generic
+window title. Match on `process` or `hwnd`.
+
+**Errors:** `GUI_DISABLED`, `UNSUPPORTED_PLATFORM`
+
+---
+
+### `capture_window(window, restore=False)`
+
+Capture a window's client area to a PNG file. **Requires `WAMCP_GUI=1` AND
+the window's executable in `WAMCP_GUI_PROCESSES`** — nothing is capturable by
+default.
+
+**Parameters:**
+- `window` (string): The process name from `list_windows`, e.g.
+  `"conflict-converge.exe"`, or its stem (`"conflict-converge"`), or a
+  numeric hwnd (e.g. `"0x1234"`). **Titles are never matched.**
+- `restore` (boolean, optional): Set true to restore a minimized window
+  before capturing. Defaults to false.
+
+**Returns:** JSON: `ok`, `path` (a PNG under `<download root>/captures/`),
+`width`, `height`, `bytes`, `elapsed_ms`, `process`, `title`, `hwnd`,
+`window_rect`, `client_offset` (`x`/`y` between the frame and the client
+area), `foreground`. **The path is returned, not the image.** A client that
+renders images can open that path; this server's `read_file` cannot, because
+it decodes UTF-8 text only.
+
+Example selector: `capture_window(window="conflict-converge.exe")`.
+
+**Errors:** `GUI_DISABLED`, `INVALID_ARGUMENT`, `WINDOW_NOT_FOUND`,
+`PROCESS_NOT_ALLOWED`, `WINDOW_MINIMIZED`, `UNSUPPORTED_PLATFORM`,
+`CAPTURE_FAILED`, `WRITE_FAILED`
+
+`PROCESS_NOT_ALLOWED` is the policy doing its job, not a mistake to work
+around. It names the process that would need an explicit operator decision
+(`WAMCP_GUI_PROCESSES=...`) and says so — do not try other windows instead.
+
+---
+
 ## Configuration
 
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `WAMCP_TOOLS` | Comma-separated tool groups to register: `core` `edit` `build` `docs` `net` `search` `research`, or `all`. `core` is always included. See [Tool groups](#tool-groups) | *(unset - everything except `search` and `research`)* |
+| `WAMCP_TOOLS` | Comma-separated tool groups to register: `core` `edit` `build` `docs` `net` `search` `research` `gui`, or `all` (which excludes `gui`). `core` is always included. See [Tool groups](#tool-groups) | *(unset - everything except `search`, `research` and `gui`)* |
 | `WAMCP_PROFILE` | Named profile from `input/config.json`. A friendlier way to select groups. See [The config file](#the-config-file) | *(unset)* |
 | `WAMCP_CONFIG_FILE` | Path to the config file, if not `./input/config.json` | *(unset)* |
 | `WAMCP_DOWNLOAD_ROOT` | Sandbox directory for downloads | `%LOCALAPPDATA%\windows-agent-mcp\downloads` |
 | `WAMCP_PROJECT_ROOTS` | Roots that `run_powershell`, `build_project` and `compile_shader` may execute inside, **and** that `write_file` / `edit_file` may write to. `;`-separated | *(unset — download root only)* |
 | `WAMCP_WORKSPACE_FROM_CWD` | Set to `1` to also treat the server's current directory as a writable root — for launchers (opencode) that start the server in the active project, so no per-project path is needed. Refused if cwd is a drive root, the home directory, or a system directory; the refusal is visible in `get_server_info` (`adopted_workspace`, `workspace_note`) | *(unset — off)* |
 | `WAMCP_WEB_RESEARCH` | Set to `1` to register `web_search` and allow `fetch_web_page` to reach any public host | *(unset — documentation hosts only)* |
+| `WAMCP_GUI` | Set to `1` to register `list_windows` and `capture_window`. **Not included in `all`** | *(unset — no desktop capture tools)* |
+| `WAMCP_GUI_PROCESSES` | Executables whose windows `capture_window` may read, `,`- or `;`-separated. Names, not paths | *(unset — default deny, no window may be captured)* |
 | `WAMCP_EXTRA_DOC_HOSTS` | Extra hostnames `fetch_web_page` may **read**, `,`- or `;`-separated. Merged with `mcp-allowed-hosts.json`. See [Granting one host](#granting-one-host) | *(unset)* |
 | `WAMCP_ALLOWED_HOSTS_FILE` | Path to the granted-hosts file, if not `./mcp-allowed-hosts.json` | *(unset)* |
 | `WAMCP_HOST_CONSENT` | Set to `0` to stop the server ever prompting you to approve a host | `1` |
@@ -749,13 +835,16 @@ WAMCP_TOOLS=edit,build,docs
 | `net` | `download_file` `fetch_https_response` `get_github_latest_release` | 360 |
 | `search` | `web_search`. Does **not** widen which hosts `fetch_web_page` may read | 180 |
 | `research` | `web_search`, and widens `fetch_web_page` to any public host | 180 |
+| `gui` | `list_windows` `capture_window`. Requires `WAMCP_GUI=1` AND a `WAMCP_GUI_PROCESSES` entry | 420 |
 
 `core` is always registered whether you list it or not, and `get_server_info`
 lives in it deliberately: it is the tool that reports which groups are active,
 so *"why can I not see `compile_shader`?"* stays answerable in every
-configuration. `all` selects every group. Unset registers everything except
-`search` and `research`, which is exactly the tool set that existed before
-groups — so upgrading never hands an install a new outbound tool.
+configuration. `all` selects every group **except `gui`** — desktop capture is
+a different consent decision from file and network access, so `all` never arms
+it for you. Unset registers everything except `search` and `research`, which
+is exactly the tool set that existed before groups — so upgrading never hands
+an install a new outbound tool.
 
 Useful profiles:
 
