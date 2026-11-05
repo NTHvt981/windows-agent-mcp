@@ -27,6 +27,7 @@ from .tools.list_windows import list_windows
 from .tools.read_file import read_file
 from .tools.run_powershell import run_powershell
 from .tools.search_files import search_files
+from .tools.send_input import send_input
 from .tools.web_search import web_search
 from .tools.write_file import write_file
 from .utils import (
@@ -36,6 +37,7 @@ from .utils import (
     TOOL_GROUPS_ENV_VAR,
     active_tool_groups,
     allowed_gui_processes,
+    gui_input_enabled,
 )
 
 __all__: list[str] = [
@@ -66,6 +68,7 @@ TOOLS: tuple[Callable[..., Any], ...] = (
     get_server_info,
     list_windows,
     capture_window,
+    send_input,
     download_file,
     fetch_https_response,
     get_github_latest_release,
@@ -107,6 +110,7 @@ TOOL_GROUPS: dict[str, tuple[Callable[..., Any], ...]] = {
     "gui": (
         list_windows,
         capture_window,
+        send_input,
     ),
 }
 
@@ -234,6 +238,13 @@ def posture_warnings(groups: frozenset[str]) -> list[str]:
             "the 'gui' group is active but WAMCP_GUI_PROCESSES is empty, so "
             "every capture_window call will be refused. Name the executable "
             "to permit, e.g. WAMCP_GUI_PROCESSES=game.exe."
+        )
+
+    if "gui" in groups and gui_input_enabled() and allowed_gui_processes():
+        messages.append(
+            "the gui group can inject input; every send_input call takes "
+            "the foreground and moves the mouse. Keep WAMCP_GUI_PROCESSES "
+            "to windows you are willing to have clicked."
         )
 
     return messages

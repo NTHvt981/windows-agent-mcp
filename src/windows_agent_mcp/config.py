@@ -127,6 +127,14 @@ SETTINGS: dict[str, Setting] = {
             "value means capture_window refuses every window."
         ),
     ),
+    "WAMCP_GUI_INPUT": Setting(
+        default="unset (capture only; no input injection)",
+        description=(
+            "Set to 1 to register send_input: it can click any control in an "
+            "allowlisted window, it takes the foreground and moves the real "
+            "mouse. Requires WAMCP_GUI=1; capture alone is read-only."
+        ),
+    ),
     "WAMCP_SEARCH_BACKEND": Setting(
         default="duckduckgo",
         description=(

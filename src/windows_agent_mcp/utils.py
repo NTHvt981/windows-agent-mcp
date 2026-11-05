@@ -128,6 +128,8 @@ GUI_ENV_VAR: str = "WAMCP_GUI"
 
 GUI_PROCESSES_ENV_VAR: str = "WAMCP_GUI_PROCESSES"
 
+GUI_INPUT_ENV_VAR: str = "WAMCP_GUI_INPUT"
+
 SEARCH_BACKEND_ENV_VAR: str = "WAMCP_SEARCH_BACKEND"
 
 _TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
@@ -187,6 +189,18 @@ def active_tool_groups() -> tuple[frozenset[str], str | None]:
 
         error = f"{error} {message}" if error else message
 
+    if (
+        os.environ.get(GUI_INPUT_ENV_VAR, "").strip().lower() in _TRUTHY_VALUES
+        and os.environ.get(GUI_ENV_VAR, "").strip().lower() not in _TRUTHY_VALUES
+    ):
+        message = (
+            f"{GUI_INPUT_ENV_VAR} is set but {GUI_ENV_VAR} is not; input stays "
+            "off because send_input lives in the gui group. Set both to "
+            "enable it."
+        )
+
+        error = f"{error} {message}" if error else message
+
     return groups, error
 
 
@@ -206,6 +220,14 @@ def gui_enabled() -> bool:
     """Return True when the gui tool group is armed."""
 
     return "gui" in active_tool_groups()[0]
+
+
+def gui_input_enabled() -> bool:
+    """True only when capture AND input are armed."""
+
+    return gui_enabled() and (
+        os.environ.get(GUI_INPUT_ENV_VAR, "").strip().lower() in _TRUTHY_VALUES
+    )
 
 
 def allowed_gui_processes() -> frozenset[str]:

@@ -11,17 +11,30 @@ import ctypes
 import ctypes.wintypes as wt
 import os
 import struct
+import time
 import zlib
 from typing import Any, NamedTuple
 
 __all__: list[str] = [
+    "KEY_SCANCODES",
+    "MODIFIER_SCANCODES",
+    "MOUSE_BUTTONS",
     "WINDOWS_AVAILABLE",
     "WindowError",
     "WindowInfo",
+    "capture_window_frame",
     "capture_window_png",
+    "client_to_screen",
     "encode_png",
     "find_window",
+    "focus_window",
+    "foreground_hwnd",
+    "frame_delta",
+    "key_down",
+    "key_up",
     "list_visible_windows",
+    "mouse_button",
+    "move_cursor",
     "restore_window",
 ]
 
@@ -32,6 +45,12 @@ DIB_RGB_COLORS: int = 0
 SW_RESTORE: int = 9
 PROCESS_QUERY_LIMITED_INFORMATION: int = 0x1000
 MAX_TITLE_CHARS: int = 120
+
+INPUT_MOUSE: int = 0
+INPUT_KEYBOARD: int = 1
+KEYEVENTF_KEYUP: int = 2
+KEYEVENTF_SCANCODE: int = 8
+VK_MENU: int = 0x12
 # Shell helper windows (taskbar strips, 1x1 owners) have no title and no
 # pixels worth capturing; listing them only costs the model context.
 MIN_UNTITLED_CLIENT: int = 100
@@ -95,6 +114,41 @@ class _BITMAPINFO(ctypes.Structure):
     ]
 
 
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wt.LONG),
+        ("dy", wt.LONG),
+        ("mouseData", wt.DWORD),
+        ("dwFlags", wt.DWORD),
+        ("time", wt.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(wt.ULONG)),
+    ]
+
+
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wt.WORD),
+        ("wScan", wt.WORD),
+        ("dwFlags", wt.DWORD),
+        ("time", wt.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(wt.ULONG)),
+    ]
+
+
+# INPUT's union is 32 bytes on x64; an explicit pad keeps the struct the size
+# Win32 expects on both 32- and 64-bit hosts.
+class _INPUTUNION(ctypes.Union):
+    _fields_ = [
+        ("mi", _MOUSEINPUT),
+        ("ki", _KEYBDINPUT),
+        ("pad", ctypes.c_ubyte * 32),
+    ]
+
+
+class _INPUT(ctypes.Structure):
+    _fields_ = [("type", wt.DWORD), ("union", _INPUTUNION)]
+
+
 if WINDOWS_AVAILABLE:
     _user32.IsWindowVisible.argtypes = [wt.HWND]
     _user32.IsWindowVisible.restype = wt.BOOL
@@ -114,6 +168,15 @@ if WINDOWS_AVAILABLE:
     _user32.PrintWindow.argtypes = [wt.HWND, wt.HDC, wt.UINT]
     _user32.PrintWindow.restype = wt.BOOL
     _user32.ShowWindow.argtypes = [wt.HWND, ctypes.c_int]
+
+    _user32.SetForegroundWindow.restype = wt.BOOL
+    _user32.SetForegroundWindow.argtypes = [wt.HWND]
+    _user32.SetCursorPos.restype = wt.BOOL
+    _user32.SetCursorPos.argtypes = [ctypes.c_long, ctypes.c_long]
+    _user32.keybd_event.restype = None
+    _user32.keybd_event.argtypes = [wt.BYTE, wt.BYTE, wt.DWORD, wt.LPVOID]
+    _user32.SendInput.restype = wt.UINT
+    _user32.SendInput.argtypes = [wt.UINT, ctypes.POINTER(_INPUT), ctypes.c_int]
 
     _gdi32.CreateCompatibleDC.restype = wt.HDC
     _gdi32.CreateCompatibleDC.argtypes = [wt.HDC]
@@ -432,16 +495,28 @@ def _bgra_to_rgb_and_crop(
     return b"".join(rows)
 
 
-def capture_window_png(info: WindowInfo) -> tuple[bytes, int, int]:
-    """Capture a window's client area; returns ``(png, width, height)``.
+def capture_window_frame(info: WindowInfo) -> tuple[bytes, int, int]:
+    """Capture a window's client area; returns ``(rgb, width, height)``.
 
     ``PrintWindow`` with ``PW_RENDERFULLCONTENT`` renders windows that are
     fully occluded by other windows, so a capture never needs to disturb
     the desktop.
     """
-
     _require_windows()
+    _raise_if_unsupported_frame(info)
+    rgb, width, height = _capture_client_pixels(info)
+    return rgb, width, height
 
+
+def capture_window_png(info: WindowInfo) -> tuple[bytes, int, int]:
+    """Capture a window's client area; returns ``(png, width, height)``."""
+
+    rgb, width, height = capture_window_frame(info)
+
+    return encode_png(width, height, rgb), width, height
+
+
+def _raise_if_unsupported_frame(info: WindowInfo) -> None:
     if info.minimized:
         raise WindowError(
             "WINDOW_MINIMIZED",
@@ -462,6 +537,8 @@ def capture_window_png(info: WindowInfo) -> tuple[bytes, int, int]:
             ],
         )
 
+
+def _capture_client_pixels(info: WindowInfo) -> tuple[bytes, int, int]:
     width = info.right - info.left
     height = info.bottom - info.top
 
@@ -546,7 +623,7 @@ def capture_window_png(info: WindowInfo) -> tuple[bytes, int, int]:
 
     rgb = _bgra_to_rgb_and_crop(raw, width, offset_x, offset_y, crop_w, crop_h)
 
-    return encode_png(crop_w, crop_h, rgb), crop_w, crop_h
+    return rgb, crop_w, crop_h
 
 
 def restore_window(info: WindowInfo) -> None:
@@ -555,3 +632,266 @@ def restore_window(info: WindowInfo) -> None:
     _require_windows()
 
     _user32.ShowWindow(info.hwnd, SW_RESTORE)
+
+
+# Set-2 make codes. Deliberately a short allowlist of names, never VK codes
+# from the caller: the caller names a letter, this table owns the hardware.
+KEY_SCANCODES: dict[str, int] = {
+    "escape": 0x01,
+    "1": 0x02,
+    "2": 0x03,
+    "3": 0x04,
+    "4": 0x05,
+    "5": 0x06,
+    "6": 0x07,
+    "7": 0x08,
+    "8": 0x09,
+    "9": 0x0A,
+    "0": 0x0B,
+    "backspace": 0x0E,
+    "tab": 0x0F,
+    "q": 0x10,
+    "w": 0x11,
+    "e": 0x12,
+    "r": 0x13,
+    "t": 0x14,
+    "y": 0x15,
+    "u": 0x16,
+    "i": 0x17,
+    "o": 0x18,
+    "p": 0x19,
+    "a": 0x1E,
+    "s": 0x1F,
+    "d": 0x20,
+    "f": 0x21,
+    "g": 0x22,
+    "h": 0x23,
+    "j": 0x24,
+    "k": 0x25,
+    "l": 0x26,
+    "z": 0x2C,
+    "x": 0x2D,
+    "c": 0x2E,
+    "v": 0x2F,
+    "b": 0x30,
+    "n": 0x31,
+    "m": 0x32,
+    "enter": 0x1C,
+    "space": 0x39,
+    "home": 0x47,
+    "up": 0x48,
+    "pageup": 0x49,
+    "left": 0x4B,
+    "right": 0x4D,
+    "end": 0x4F,
+    "down": 0x50,
+    "pagedown": 0x51,
+    "insert": 0x52,
+    "delete": 0x53,
+    "f1": 0x3B,
+    "f2": 0x3C,
+    "f3": 0x3D,
+    "f4": 0x3E,
+    "f5": 0x3F,
+    "f6": 0x40,
+    "f7": 0x41,
+    "f8": 0x42,
+    "f9": 0x43,
+    "f10": 0x44,
+    "f11": 0x57,
+    "f12": 0x58,
+}
+
+MODIFIER_SCANCODES: dict[str, int] = {
+    "ctrl": 0x1D,
+    "shift": 0x2A,
+    "alt": 0x38,
+}
+
+# SendInput MOUSEINPUT dwFlags pairs: (button-down flag, button-up flag).
+MOUSE_BUTTONS: dict[str, tuple[int, int]] = {
+    "left": (0x0002, 0x0004),
+    "right": (0x0008, 0x0010),
+    "middle": (0x0020, 0x0040),
+}
+
+
+def _send_input(event: _INPUT) -> None:
+    if _user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(_INPUT)) == 0:
+        raise WindowError(
+            "INPUT_FAILED",
+            f"SendInput refused the event and reported {ctypes.get_last_error()}.",
+            [
+                "Do not retry blindly; a system-level input block (UAC secure "
+                "desktop, a fullscreen elevated app) refuses any injection.",
+                "Do not retry repeatedly: this is a real Win32 error, not a "
+                "delivery doubt.",
+            ],
+        )
+
+
+def move_cursor(x: int, y: int) -> None:
+    """Move the cursor to the screen position: SetCursorPos lands exactly."""
+
+    _require_windows()
+
+    if not _user32.SetCursorPos(x, y):
+        raise WindowError(
+            "INPUT_FAILED",
+            "SetCursorPos failed to move the mouse cursor.",
+            ["Do not retry repeatedly; check the coordinates are on screen."],
+        )
+
+
+def mouse_button(button: str, down: bool) -> None:
+    """Press or release a mouse button via SendInput at the current position."""
+
+    _require_windows()
+
+    event = _INPUT()
+    event.type = INPUT_MOUSE
+    event.union.mi.dwFlags = MOUSE_BUTTONS[button][0 if down else 1]
+
+    _send_input(event)
+
+
+def key_down(scan: int) -> None:
+    """Press one key by Set-2 scancode via SendInput."""
+
+    _require_windows()
+
+    event = _INPUT()
+    event.type = INPUT_KEYBOARD
+    event.union.ki.wScan = scan
+    event.union.ki.dwFlags = KEYEVENTF_SCANCODE
+
+    _send_input(event)
+
+
+def key_up(scan: int) -> None:
+    """Release one key by Set-2 scancode via SendInput."""
+
+    _require_windows()
+
+    event = _INPUT()
+    event.type = INPUT_KEYBOARD
+    event.union.ki.wScan = scan
+    event.union.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP
+
+    _send_input(event)
+
+
+def client_to_screen(info: WindowInfo, x: int, y: int) -> tuple[int, int]:
+    """Map client-relative coordinates to screen coordinates right now.
+
+    Called at injection time so a window that moved after ``find_window``
+    still lands the click where the caller meant, not where it used to be.
+    """
+
+    _require_windows()
+
+    point = _POINT(x, y)
+
+    if not _user32.ClientToScreen(info.hwnd, ctypes.byref(point)):
+        raise WindowError(
+            "CAPTURE_FAILED",
+            "ClientToScreen failed to map the client point to screen space.",
+            [
+                "Re-resolve the window with list_windows; the window may be closing.",
+            ],
+        )
+
+    return int(point.x), int(point.y)
+
+
+def foreground_hwnd() -> int:
+    """The hwnd of the foreground window, or 0 when there is none."""
+
+    _require_windows()
+
+    return int(_user32.GetForegroundWindow() or 0)
+
+
+_FOCUS_SETTLE_SECONDS = 0.35
+
+
+def focus_window(info: WindowInfo) -> tuple[bool, str]:
+    """Take the foreground; never raises on refusal.
+
+    ``SetForegroundWindow`` alone is refused when another application owns
+    the foreground (measured from a detached, windowless process): a brief
+    Alt key press and release first unlocks the foreground lock, and only a
+    follow-up verification decides the result -- a TRUE return is not proof.
+    """
+
+    _require_windows()
+
+    if foreground_hwnd() == info.hwnd:
+        return True, "already"
+
+    _user32.keybd_event(VK_MENU, 0, 0, None)
+    _user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, None)
+
+    _user32.SetForegroundWindow(info.hwnd)
+
+    time.sleep(_FOCUS_SETTLE_SECONDS)
+
+    if foreground_hwnd() == info.hwnd:
+        return True, "alt"
+
+    return False, "refused"
+
+
+# Sampling step for frame_delta: every second pixel in x (3 channels * 2) and
+# every second row. A full Python per-pixel loop is minutes-slow; a quarter
+# sample stays well under the budget at 1200x675.
+_DELTA_CHANNEL_THRESHOLD = 8
+
+
+def frame_delta(
+    before: tuple[bytes, int, int],
+    after: tuple[bytes, int, int],
+) -> float:
+    """Fraction of SAMPLED pixels that changed, not an exact count.
+
+    Every second pixel in x and every second row is compared; a pixel counts
+    as changed when any channel differs by more than 8. Sizes differing means
+    different screenshots altogether, so 1.0. Identical frames are 0.0.
+    """
+
+    rgb_before, width, height = before
+    if (width, height) != (after[1], after[2]):
+        return 1.0
+
+    rgb_after = after[0]
+
+    if rgb_before == rgb_after:
+        return 0.0
+
+    stride = width * 3
+    x_step = 6
+
+    sampled = 0
+    changed = 0
+
+    for y in range(0, height, 2):
+        row_start = y * stride
+        row_before = rgb_before[row_start : row_start + stride]
+        row_after = rgb_after[row_start : row_start + stride]
+
+        for offset in range(0, stride - 2, x_step):
+            sampled += 1
+
+            if (
+                abs(row_before[offset] - row_after[offset]) > _DELTA_CHANNEL_THRESHOLD
+                or abs(row_before[offset + 1] - row_after[offset + 1])
+                > _DELTA_CHANNEL_THRESHOLD
+                or abs(row_before[offset + 2] - row_after[offset + 2])
+                > _DELTA_CHANNEL_THRESHOLD
+            ):
+                changed += 1
+
+    if sampled == 0:
+        return 0.0
+
+    return round(changed / sampled, 4)

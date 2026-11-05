@@ -6,6 +6,7 @@ REM    run_server.bat              start the server over stdio
 REM    run_server.bat --dev        start it under the MCP Inspector
 REM    run_server.bat --web        enable the web research tools
 REM    run_server.bat --gui        enable the window capture tools
+REM    run_server.bat --gui-input  arm input injection (implies --gui)
 REM    run_server.bat --dev --web  both
 REM
 REM    run_server.bat --allow-host docs.example.com
@@ -46,6 +47,12 @@ if /I "%~1"=="--web" (
 )
 if /I "%~1"=="--gui" (
     set "GUI=1"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="--gui-input" (
+    set "GUI=1"
+    set "GUI_INPUT=1"
     shift
     goto parse_args
 )
@@ -145,6 +152,17 @@ if defined GUI (
     echo            set WAMCP_GUI_PROCESSES=game.exe
     echo        for this run. Reading screen contents only -- no input is
     echo        ever sent to any window. See README.md.
+    echo.
+)
+
+if defined GUI_INPUT (
+    set "WAMCP_GUI_INPUT=1"
+    set "WAMCP_GUI=1"
+    echo [info] GUI INPUT ARMED -- send_input is registered in addition to
+    echo        capture. Every send_input call takes the foreground away
+    echo        from what you are doing and moves the real mouse. Keep
+    echo        WAMCP_GUI_PROCESSES to windows you are willing to have
+    echo        clicked. See README.md.
     echo.
 )
 
@@ -291,7 +309,7 @@ echo         Install Node.js, or run without --dev.
 goto fail
 
 :usage
-echo Usage: run_server.bat [--dev] [--web] [--gui] [--tools GROUPS]
+echo Usage: run_server.bat [--dev] [--web] [--gui] [--gui-input] [--tools GROUPS]
 echo                       [--profile NAME] [--allow-host HOSTS]
 echo.
 echo   --dev    Run under the MCP Inspector (needs Node.js/npx). Gives you a
@@ -307,6 +325,16 @@ echo            capture_window. capture_window is refused for any
 echo            executable not named in WAMCP_GUI_PROCESSES; reading a
 echo            window can see passwords, so the allowlist is per name.
 echo            Read the "Desktop Capture" section of README.md first.
+echo   --gui-input
+echo            Implies --gui, and also sets WAMCP_GUI_INPUT=1 to register
+echo            send_input: mouse and keyboard injection into allowlisted
+echo            windows. INPUT INJECTION IS ARMED: every call takes the
+echo            foreground away from what you are doing, moves the real
+echo            mouse and can click any control in the allowlisted window.
+echo            It can click wrong things just as easily as right ones; a
+echo            3-4%% frame delta is a normal landed order, 30%% is often
+echo            just scene animation. Read the Desktop Capture section of
+echo            README.md first.
 echo   --tools  Comma-separated tool groups to register. Fewer tools means
 echo            more context left for the model to work in. Groups:
 echo              core      always on: read, list, find, search, info
@@ -321,9 +349,11 @@ echo                        widening which hosts it may read. Pair it
 echo                        with docs; alone it finds pages nothing can
 echo                        open, and startup will say so.
 echo              research  web_search, and any-public-host fetching
-echo              gui       list_windows, capture_window. Refused per
-echo                        executable unless named in
-echo                        WAMCP_GUI_PROCESSES; NOT part of 'all'
+echo              gui       list_windows, capture_window, send_input.
+echo                        Refused per executable unless named in
+echo                        WAMCP_GUI_PROCESSES; capture with no
+echo                        WAMCP_GUI_INPUT, input only with both; NOT
+echo                        part of 'all'
 echo              all       every group except gui
 echo            Omit to register everything except search, research
 echo            and gui.
