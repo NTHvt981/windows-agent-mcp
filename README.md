@@ -49,6 +49,11 @@ Registered **only** when `WAMCP_GUI=1`, and never as part of `all`. See the
   file under `<download root>/captures/`, returning the path. Read-only: no
   input is ever sent to a window. A minimized window must first be restored
   (`restore=True`).
+- `send_input` - Inject mouse and keyboard events into ONE allowlisted
+  window. Needs an additional gate, `WAMCP_GUI_INPUT=1` on top of
+  `WAMCP_GUI=1`: capture alone is read-only, and input is a separate,
+  larger consent decision. Every call takes the foreground and moves the
+  real mouse; see [send_input](#send_inputwindow-actions-settle_ms350).
 
 ### Introspection Tools
 - `get_server_info` - Server configuration, writable roots and network policy
@@ -134,9 +139,22 @@ content. It is a screen-reading grant, not an automation grant:
   applications' windows may be captured. It is **default-deny**: unset, no
   window is capturable. Names, not paths, because the trust question is
   "which program's screen may I read", not "where does it live on disk".
-- **No input is sent.** The group is capture only: nothing focuses a window,
-  clicks or types. The tool may restore a minimized window (`restore=True`)
-  and that is the entire extent of its influence over other windows.
+- **No input is sent,** until a second grant arms it. By default the group
+  is capture only: nothing focuses a window, clicks or types. The capture
+  tool may restore a minimized window (`restore=True`) and that is the
+  entire extent of its influence over other windows.
+- **Input is a control grant, not a screen grant.** When `WAMCP_GUI_INPUT=1`
+  is set as well, `send_input` is registered: it can click ANY control in
+  an allowlisted window — buttons, menus, "delete", "send", confirmations —
+  it takes the foreground away from whatever the user is doing, and it
+  moves the real mouse. It can click the wrong thing just as easily as the
+  right one. Set `WAMCP_GUI_INPUT` only if you accept the named processes
+  being operated.
+- **Input evidence is a pixel delta, not a verdict.** `send_input` returns
+  the raw fraction of sampled pixels that changed between the before and
+  after captures. A 3–4% delta is a normal, landed order; 30% is often
+  just scene animation — compare and read the images, never threshold one
+  number.
 - Capture output is written **only** under the download root
   (`<download_root>/captures/`), atomically, next to every other artifact
   this server writes.
@@ -788,6 +806,62 @@ around. It names the process that would need an explicit operator decision
 
 ---
 
+### `send_input(window, actions, settle_ms=350)`
+
+Inject mouse and keyboard events into ONE allowlisted window. **Requires
+`WAMCP_GUI=1` AND `WAMCP_GUI_INPUT=1` AND the window's executable in
+`WAMCP_GUI_PROCESSES`** — with capture only, this tool is not registered;
+with the input gate it can click any control in the allowlisted window, it
+steals the foreground from whatever you are doing, and it moves the real
+mouse.
+
+**Parameters:**
+- `window` (string): Same selector as `capture_window` — process name,
+  stem, or numeric hwnd. **Titles are never matched.**
+- `actions` (list of objects, required): Run in order. Accepted shapes:
+  - `{"type": "click", "x": 100, "y": 200, "button": "left", "count": 1,
+    "hold_ms": 50}`
+  - `{"type": "drag", "from": [10, 20], "to": [210, 220], "button":
+    "left", "duration_ms": 250}`
+  - `{"type": "key", "key": "escape", "modifiers": ["ctrl"], "hold_ms":
+    50}`
+  Defaults may be omitted: `button` (`"left"`), `count` (1–3, default 1),
+  `hold_ms` (50, clamped 10..1000), drag `duration_ms` (250, clamped
+  50..3000), `modifiers`. `x`/`y` (click) and `from`/`to` (drag) are
+  **client-relative pixels** inside `[0, client_width) x [0,
+  client_height)` from `list_windows` — never screen coordinates. Key
+  names are a fixed allowlist: `escape`, `0`-`9`, `a`-`z`, `enter`,
+  `backspace`, `tab`, `space`, `home`, `up`, `pageup`, `left`, `right`,
+  `end`, `down`, `pagedown`, `insert`, `delete`, `f1`…`f12`.
+- `settle_ms` (int, optional): Wait before the "after" capture, clamped
+  0..5000. Default 350.
+
+**Returns:** JSON on success: `ok`, `window` (`process`, `title`, `hwnd`,
+`client_width`, `client_height`), `actions` (completed count), `focus`
+(`"already"` or `"alt"`), `before` and `after` (PNG paths under
+`<download root>/captures/`, written atomically as a `-before`/`-after`
+pair),
+`delta` (fraction of SAMPLED pixels that changed by more than 8 per
+channel), `delta_note`, `settle_ms`, `elapsed_ms`, `foreground_after`.
+**There is no `changed` boolean.** A 3–4% delta is a normal order landing
+while 30% is often just scene animation: open the two PNGs and compare,
+and never claim success from one number.
+
+**Errors:** `GUI_DISABLED`, `GUI_INPUT_DISABLED`, `INVALID_ARGUMENT`,
+`WINDOW_NOT_FOUND`, `PROCESS_NOT_ALLOWED`, `WINDOW_MINIMIZED`,
+`FOCUS_REFUSED`, `FOCUS_LOST`, `UNSUPPORTED_PLATFORM`, `CAPTURE_FAILED`,
+`INPUT_FAILED`, `WRITE_FAILED`
+
+Every argument is validated BEFORE the foreground is touched; focus is
+verified (`GetForegroundWindow`) not assumed — a `SetForegroundWindow`
+TRUE is not proof; and if focus is lost mid-sequence the tool stops
+immediately with the completed count rather than typing into whatever you
+switched to. `Escape` can open a quit confirmation on a title screen and
+`P` can open a modal pause menu; no key is ever sent as a generic
+"cancel" — check the after frame and decide with the user.
+
+---
+
 ## Configuration
 
 ### Environment Variables
@@ -802,7 +876,8 @@ around. It names the process that would need an explicit operator decision
 | `WAMCP_WORKSPACE_FROM_CWD` | Set to `1` to also treat the server's current directory as a writable root — for launchers (opencode) that start the server in the active project, so no per-project path is needed. Refused if cwd is a drive root, the home directory, or a system directory; the refusal is visible in `get_server_info` (`adopted_workspace`, `workspace_note`) | *(unset — off)* |
 | `WAMCP_WEB_RESEARCH` | Set to `1` to register `web_search` and allow `fetch_web_page` to reach any public host | *(unset — documentation hosts only)* |
 | `WAMCP_GUI` | Set to `1` to register `list_windows` and `capture_window`. **Not included in `all`** | *(unset — no desktop capture tools)* |
-| `WAMCP_GUI_PROCESSES` | Executables whose windows `capture_window` may read, `,`- or `;`-separated. Names, not paths | *(unset — default deny, no window may be captured)* |
+| `WAMCP_GUI_PROCESSES` | Executables whose windows `capture_window` may read and `send_input` may operate, `,`- or `;`-separated. Names, not paths | *(unset — default deny, no window may be captured)* |
+| `WAMCP_GUI_INPUT` | Set to `1` to register `send_input` (requires `WAMCP_GUI=1`). **This is a control grant**: it takes the foreground and moves the real mouse; capture alone is read-only | *(unset — capture only; no input injection)* |
 | `WAMCP_EXTRA_DOC_HOSTS` | Extra hostnames `fetch_web_page` may **read**, `,`- or `;`-separated. Merged with `mcp-allowed-hosts.json`. See [Granting one host](#granting-one-host) | *(unset)* |
 | `WAMCP_ALLOWED_HOSTS_FILE` | Path to the granted-hosts file, if not `./mcp-allowed-hosts.json` | *(unset)* |
 | `WAMCP_HOST_CONSENT` | Set to `0` to stop the server ever prompting you to approve a host | `1` |
@@ -835,7 +910,7 @@ WAMCP_TOOLS=edit,build,docs
 | `net` | `download_file` `fetch_https_response` `get_github_latest_release` | 360 |
 | `search` | `web_search`. Does **not** widen which hosts `fetch_web_page` may read | 180 |
 | `research` | `web_search`, and widens `fetch_web_page` to any public host | 180 |
-| `gui` | `list_windows` `capture_window`. Requires `WAMCP_GUI=1` AND a `WAMCP_GUI_PROCESSES` entry | 420 |
+| `gui` | `list_windows` `capture_window` `send_input`. Requires `WAMCP_GUI=1` AND a `WAMCP_GUI_PROCESSES` entry; `send_input` additionally needs `WAMCP_GUI_INPUT=1` | 700 |
 
 `core` is always registered whether you list it or not, and `get_server_info`
 lives in it deliberately: it is the tool that reports which groups are active,

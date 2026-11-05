@@ -13,8 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `WAMCP_GUI=1`, and deliberately **excluded from `all`**. Desktop window
   capture can read anything visible in a window (including passwords behind
   masked fields), so it is a consent decision on its own rather than a side
-  effect of asking for every file and network tool. The group is capture
-  only: no input injection exists, no window is focused, nothing is clicked.
+  effect of asking for every file and network tool. Without
+  `WAMCP_GUI_INPUT=1` the group stays read-only: nothing is focused,
+  clicked or typed.
 
   Why capture at all instead of a full-desktop screenshot tool: an agent
   working a game or a windowed app needs *that* window's pixels fresh each
@@ -34,6 +35,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   server's single writable-by-default place; the tool returns the file's
   path, not the image, so a scan-sized PNG never lands in the context
   window unasked.
+
+- `send_input` and the third gate, `WAMCP_GUI_INPUT`. Where `capture_window`
+  reads, `send_input` operates: mouse and keyboard events injected into one
+  allowlisted window, gated this third time because a click is a consent
+  decision of a different kind than a read — a successful capture shows the
+  "Save" dialog, a successful send_input clicks it. It registers only when
+  `WAMCP_GUI=1` too, and `run_server.bat --gui-input` implies `--gui`.
+
+  Why the API returns a raw pixel delta instead of a verdict: SendInput
+  returning 1 is NOT evidence the window heard anything, and the alternative
+  evidence had to be measured. During probe rounds, one landed order in a
+  fresh scene showed a 0.3–0.7% frame change (0.04% in a static match, 0.0%
+  paused), while pure scene animation during combat churned 33–36%. No
+  single threshold separates "clicked" from "clicked into the weeds", so the
+  tool returns the sampled ratio, walks away from boolean claims (`delta`
+  and a `delta_note`, never a `changed` field), and lets the caller open
+  the two PNGs, which land under `<download root>/captures/` as an
+  atomically-written `-before`/`-after` pair.
+
+  Why coordinates are client-relative: the measured contract. A window sits
+  at (352,147) with client origin offset (8,31), which changes on move,
+  resize and DPI, and the orchestrator already reads geometry from
+  `list_windows`. `ClientToScreen` runs at injection time (not capture
+  time), so a window that moved after session start still lands the click
+  where the caller meant; raw screen coordinates from a caller would only
+  be a way to inject into the wrong window.
+
+  Why focus is stolen with Alt and then verified: `SetForegroundWindow`
+  alone was REFUSED from a detached, windowless process while another app
+  owned the foreground, and `AttachThreadInput` was refused too. The
+  measured unlock is keybd_event Alt press+release followed by
+  `SetForegroundWindow`. Even then the TRUE return is not proof, so the
+  tool re-checks `GetForegroundWindow` 0.35 s later and fails closed with
+  `FOCUS_REFUSED` — and re-checks around EVERY action, because once the
+  user alt-tabs away, business as usual would type into their document.
+
+  Two other measured facts are now API behaviour rather than tribal
+  knowledge: clicks shorter than 10 ms are dropped (suppressed) while 20
+  ms land, so the default hold is 50 ms and below-10 ms is refused; and
+  the key list is a fixed allowlist with no "generic cancel" — Escape and
+  P are documented traps (quit confirmation, modal pause menu on the title
+  screen), never undo primitives.
 
 - `WAMCP_LAUNCH_CWD` — the launcher records the directory it was started in.
   `run_server.bat` `pushd`'s to the server's own directory (to find its
